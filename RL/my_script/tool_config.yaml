@@ -1,0 +1,67 @@
+tools:
+  - class_name: "my_script.tools.python_tool.CustomSandboxFusionTool"
+    config:
+      sandbox_fusion_url: "http://localhost:8080/run_code"
+      num_workers: 128
+      enable_global_rate_limit: true
+      rate_limit: 128
+      default_timeout: 30
+      default_language: "python"
+      memory_limit_mb: 1024
+      type: native
+
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_interpreter"
+        description: "Python code sandbox, which can be used to execute Python code."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: "The python code."
+          required: ["code"]
+      
+  - class_name: "my_script.tools.mock_tool.MockSandboxFusionTool"
+    config:
+      sandbox_fusion_url: ""
+      sandbox_fusion_key: ""
+      num_workers: 128
+      enable_global_rate_limit: true
+      rate_limit: 128
+      default_timeout: 30
+      type: native
+
+    tool_schema:
+      type: "function"
+      function:
+        name: "mock_tool"
+        description: "An LLM imitates a tool"
+        parameters:
+          type: "object"
+          properties:
+            query:
+              type: "string"
+              description: "The query."
+          required: ["query"]
+
+  # - class_name: my_script.tools.search_tool.CustomSearchTool
+  #   config:
+  #     retrieval_service_url: "https://idealab.alibaba-inc.com/api/v1/search/search"
+  #     num_workers: 16
+  #     rate_limit: 16
+  #     timeout: 60
+  #     type: native
+  #   tool_schema:
+  #     type: "function"
+  #     function:
+  #       name: "my_web_search"
+  #       description: "Performs web searches using the Google Search API."
+  #       parameters:
+  #         type: "object"
+  #         properties:
+  #           query:
+  #             type: "string"
+  #             description: "Keywords for the search query."
+  #         required: ["query"]

@@ -1,0 +1,44 @@
+# Different models for different steps
+step_models:
+  ToolSetGenAgent:
+    name: "qwen3-235b-a22b-instruct-2507"
+    max_tokens: 10240
+    temperature: 0.9
+  FuzzyTaskAgent:
+    name: "qwen3-235b-a22b-instruct-2507"
+    max_tokens: 10240
+    temperature: 0.9
+  ToolCheckAgent:
+    name: "qwen3-235b-a22b-instruct-2507"
+    max_tokens: 10240
+    temperature: 0.9
+  SolveAgent:
+    name: "qwen3-235b-a22b-instruct-2507"
+    max_tokens: 10240
+    temperature: 0.9
+  MockToolAgent:
+    name: "qwen3-235b-a22b-instruct-2507"
+    max_tokens: 10240
+    temperature: 0.9
+
+processing:
+  max_workers: 10
+  max_tasks: 10000
+
+logging:
+  task_file_path: "output/virtual_tool_use.jsonl"
+  solve_path: "output/solve_tool_use/"
+
+paths:
+  data_file: "configs/persona_5K.jsonl"
+
+api_configs:
+  "Qwen3-235B-A22B-Instruct-2507":
+    api_base: "Qwen3_235B_A22B_Instruct_ADDRESS"
+    api_key_env: "Qwen3_235B_A22B_Instruct_API_KEY"
+  "qwen3-235b-a22b-instruct-2507":
+    api_base: "Qwen3_235B_A22B_Instruct_ADDRESS_bailian"
+    api_key_env: "Qwen3_235B_A22B_Instruct_API_KEY_bailian"
+  "Local":
+    api_base: "http://0.0.0.0:8000/v1"
+    api_key_env: EMPTY
