@@ -30,6 +30,7 @@ config = load_env_config()
 MAX_CONCURRENT_REQUESTS = 16
 MAX_RETRIES = 3
 BASE_DELAY = 10
+TIMEOUT = 150.0
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 _llm_http_client: Optional[httpx.AsyncClient] = None
 
@@ -45,7 +46,7 @@ def _safe_preview(text: str, limit: int = 1200) -> str:
 async def _get_llm_client() -> httpx.AsyncClient:
     global _llm_http_client
     if _llm_http_client is None or _llm_http_client.is_closed:
-        _llm_http_client = httpx.AsyncClient(timeout=httpx.Timeout(150.0))
+        _llm_http_client = httpx.AsyncClient(timeout=httpx.Timeout(TIMEOUT))
     return _llm_http_client
 
 
@@ -294,7 +295,7 @@ Be strict, and be strict!
         total_sec_count = 0
         for section in result['section_scores']:
             if section["name"].strip().startswith("Policy"):
-                if section['total'] == 0 or section['score'] / section['total'] < 0.5:
+                if section['total'] == 0 or section['score'] == 0:
                     return 0.0
                 continue
 
@@ -394,7 +395,10 @@ async def compute_score_math(data_source, solution_str, ground_truth, extra_info
     
     # Assign reward score
     if is_correct:
-        reward_score = 1.0
+        if "<tool_call>" in solution_str:
+            reward_score = 1.0
+        else:
+            reward_score = 0.9
     else:
         reward_score = 0.0  # Format reward for incorrect answers
     

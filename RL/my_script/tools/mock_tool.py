@@ -3,6 +3,8 @@ import logging
 import os
 import re
 import threading
+import time
+import httpx
 from contextlib import ExitStack
 from enum import Enum
 from typing import Any, Callable, Optional, TypeVar
@@ -11,6 +13,7 @@ from uuid import uuid4
 import ray
 from dotenv import load_dotenv
 from openai import OpenAI
+from openai import APITimeoutError as OpenAIAPITimeoutError
 from filelock import FileLock
 
 from verl.tools.base_tool import BaseTool
@@ -34,29 +37,43 @@ def call_llm_api(
     model_name: str,
     max_tokens: int,
     temperature: float=0.9,
+    api_timeout: float=300.0,
 ):
-    client = OpenAI(api_key=api_key, base_url=api_base)
-    dynamic_model_id = model_name
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-    
-    response = client.chat.completions.create(
-        model=dynamic_model_id,
-        messages=messages,
-        temperature=temperature,
-        extra_body={"max_completion_tokens": max_tokens},
-    )
-    response_content = response.choices[0].message.content
-    messages.append(
-        {"role": "assistant", "content": response_content}
-    )
+    """Call LLM API with timeout control."""
+    api_start_time = time.time()
+    try:
+        client = OpenAI(api_key=api_key, base_url=api_base, timeout=api_timeout, max_retries=0)
+        dynamic_model_id = model_name
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        response = client.chat.completions.create(
+            model=dynamic_model_id,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        api_elapsed = time.time() - api_start_time
+        response_content = response.choices[0].message.content
+        messages.append(
+            {"role": "assistant", "content": response_content}
+        )
+        # print(f"API call successful after {api_elapsed:.2f}s")
+        return messages
+    except (TimeoutError, httpx.TimeoutException, OpenAIAPITimeoutError) as e:
+        api_elapsed = time.time() - api_start_time
+        logger.error(f"[TIMEOUT] API call timed out after {api_elapsed:.2f}s (limit: {api_timeout}s): {type(e).__name__}: {e}")
+        raise
+    except Exception as e:
+        api_elapsed = time.time() - api_start_time
+        logger.error(f"[ERROR] API call failed after {api_elapsed:.2f}s: {type(e).__name__}: {e}")
+        raise
 
-    return messages
-
-def mock_user_response(task_background, history_messages):
+def mock_user_response(task_background, history_messages, user_timeout: float=300.0):
+    """Generate mock user response with timeout control."""
     user_prompt = f"""
 You are an agent user who wants to accomplish a task with tools.
 
@@ -83,7 +100,8 @@ Write your reply in the following format:
         api_base=os.environ.get("MOCK_USER_API_BASE", ""),
         api_key=os.environ.get("MOCK_USER_API_KEY", ""),
         model_name="",
-        max_tokens=10240
+        max_tokens=2048,
+        api_timeout=user_timeout
     )
 
     all_content = messages[-1]["content"]
@@ -93,7 +111,9 @@ Write your reply in the following format:
         user_response = last_match.strip()
     else:
         # breakpoint()
-        user_response = None
+        logger.warning("Failed to parse user response, use the raw content instead")
+        user_response = all_content
+        # print(all_content)
 
     return user_response
 
@@ -126,13 +146,14 @@ class TokenBucketWorker:
 
 
 class ExecutionWorker:
-    def __init__(self, enable_global_rate_limit=True, rate_limit=10):
+    def __init__(self, enable_global_rate_limit=True, rate_limit=10, acquire_timeout=30):
         self.rate_limit_worker = self._init_rate_limit(rate_limit) if enable_global_rate_limit else None
+        self.acquire_timeout = acquire_timeout  # Timeout for acquiring rate limit token
 
     def _init_rate_limit(self, rate_limit):
         # TODO validation for rate_limit
         # A Singleton Rate Limitor
-        return TokenBucketWorker.options(name="rate-limiter", get_if_exists=True).remote(rate_limit)
+        return TokenBucketWorker.options(name="mock-tool-rate-limiter", get_if_exists=True).remote(rate_limit)
 
     def ping(self):
         return True
@@ -140,22 +161,47 @@ class ExecutionWorker:
     def execute(self, fn: Callable[..., T], *fn_args, **fn_kwargs) -> T:
         with ExitStack() as stack:
             stack.callback(self.rate_limit_worker.release.remote)
-            ray.get(self.rate_limit_worker.acquire.remote())
+            # Add timeout for acquiring rate limit token to prevent indefinite waiting
+            acquire_start_time = time.time()
             try:
-                return fn(*fn_args, **fn_kwargs)
+                # Use ray.wait with timeout to avoid indefinite blocking
+                acquire_ref = self.rate_limit_worker.acquire.remote()
+                ready, not_ready = ray.wait([acquire_ref], timeout=self.acquire_timeout, num_returns=1)
+                if not ready:
+                    acquire_elapsed = time.time() - acquire_start_time
+                    error_msg = f"[TIMEOUT_DIAGNOSIS] Rate limit acquire timeout: waited {acquire_elapsed:.2f}s (limit: {self.acquire_timeout}s)"
+                    logger.error(error_msg)
+                    return ToolResponse(text="Timeout, please try again later")
+
+                ray.get(acquire_ref)  # Ensure it's acquired
+                acquire_elapsed = time.time() - acquire_start_time
+
+            except TimeoutError:
+                return ToolResponse(text="Timeout, please try again later")
             except Exception as e:
-                # TODO we should make this available to the tool caller
-                logger.warning(f"Error when executing code: {e}")
+                acquire_elapsed = time.time() - acquire_start_time
+                logger.error(f"[TIMEOUT_DIAGNOSIS] Rate limit acquire failed after {acquire_elapsed:.2f}s: {e}")
+                return ToolResponse(text="Timeout, please try again later")
+            # Execute the actual function
+            fn_start_time = time.time()
+            try:
+                result = fn(*fn_args, **fn_kwargs)
+                fn_elapsed = time.time() - fn_start_time
+                return result
+            except Exception as e:
+                fn_elapsed = time.time() - fn_start_time
+                # logger.warning(f"[TIMEOUT_DIAGNOSIS] Function execution failed after {fn_elapsed:.2f}s: {e}")
+                return ToolResponse(text="Timeout, please try again later")
 
 
 def init_execution_pool(
-    num_workers: int, enable_global_rate_limit=True, rate_limit=10, mode: PoolMode = PoolMode.ThreadMode
+    num_workers: int, enable_global_rate_limit=True, rate_limit=10, acquire_timeout=30, mode: PoolMode = PoolMode.ThreadMode
 ):
     if mode == PoolMode.ThreadMode:
         return (
             ray.remote(ExecutionWorker)
             .options(max_concurrency=num_workers)
-            .remote(enable_global_rate_limit=enable_global_rate_limit, rate_limit=rate_limit)
+            .remote(enable_global_rate_limit=enable_global_rate_limit, rate_limit=rate_limit, acquire_timeout=acquire_timeout)
         )
     else:
         raise NotImplementedError("Process mode is not implemented yet")
@@ -199,11 +245,15 @@ class MockSandboxFusionTool(BaseTool):
         self.num_workers = config.get("num_workers", 10)
         self.rate_limit = config.get("rate_limit", 10)
         self.default_timeout = config.get("default_timeout", 30)
+        # Timeout for acquiring rate limit token (separate from API timeout)
+        # Should be much smaller than default_timeout to fail fast if rate limit is saturated
+        self.acquire_timeout = config.get("acquire_timeout", 30)
         self.enable_global_rate_limit = config.get("enable_global_rate_limit", True)
         self.execution_pool = init_execution_pool(
             num_workers=self.num_workers,
             enable_global_rate_limit=self.enable_global_rate_limit,
             rate_limit=self.rate_limit,
+            acquire_timeout=self.acquire_timeout,
             mode=PoolMode.ThreadMode,
         )
         self.sandbox_fusion_url = config.get("sandbox_fusion_url", "") or os.environ.get("MOCK_TOOL_API_BASE", "")
@@ -228,14 +278,11 @@ class MockSandboxFusionTool(BaseTool):
 
         tool_call_history_path = os.path.join(tool_call_history_path_root, index_id, "tool_call_history.json")
 
-        if os.path.exists(tool_call_history_path):
-            with open(tool_call_history_path) as f:
-                tool_call_history = json.load(f)
-        else:
-            os.makedirs(os.path.dirname(tool_call_history_path), exist_ok=True)
-            tool_call_history = []
-            with open(tool_call_history_path, "w") as f:
-                json.dump(tool_call_history, f)
+        # if not os.path.exists(tool_call_history_path):
+        #     os.makedirs(os.path.dirname(tool_call_history_path), exist_ok=True)
+        #     tool_call_history = []
+        #     with open(tool_call_history_path, "w") as f:
+        #         json.dump(tool_call_history, f)
 
 
         if instance_id is None:
@@ -254,27 +301,27 @@ class MockSandboxFusionTool(BaseTool):
     @rollout_trace_op
     async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> tuple[ToolResponse, float, dict]:
         mock_tool_name_and_args = parameters.get("mock_tool_name_and_args", "")
-        timeout = parameters.get("timeout", self.default_timeout)
+        total_timeout = parameters.get("timeout", self.default_timeout)
         history_messages = parameters.get("history_messages", [])
         if not isinstance(mock_tool_name_and_args, str):
             mock_tool_name_and_args = str(mock_tool_name_and_args)
 
-        result = await self.execution_pool.execute.remote(self.execute_mock_tool, instance_id, mock_tool_name_and_args, history_messages, timeout)
+        result = await self.execution_pool.execute.remote(self.execute_mock_tool, instance_id, mock_tool_name_and_args, history_messages, total_timeout)
 
-        if result is None or result.text == "None":
-            logger.warning("Response is None for mock tools or users")
         # sandbox has no score or metrics, use Nones
         return result, None, None
 
     def execute_mock_tool(self, instance_id, mock_tool_name_and_args, history_messages, timeout=30):
-        def mock_tool_response(mock_tool_name_and_args, tool_description, save_tool_call_path):
+        """Execute mock tool with timeout control."""
+        def mock_tool_response(mock_tool_name_and_args, tool_description, save_tool_call_path, tool_timeout=30):
             # breakpoint()
-            lock_path = save_tool_call_path + ".lock"
-            file_lock = FileLock(lock_path, timeout=10)
+            # lock_path = save_tool_call_path + ".lock"
+            # file_lock = FileLock(lock_path, timeout=10)
 
-            with file_lock:
-                with open(save_tool_call_path, "r") as f:
-                    world_state = json.load(f)
+            # with file_lock:
+            #     with open(save_tool_call_path, "r") as f:
+            #         world_state = json.load(f)
+            world_state = []
             
             tool_simulation_prompt_with_memory = """
 You are the prophet of the virtual world, knowing all affairs and details of the virtual world, and able to remember all previously established background and states of the virtual world. Now, an external intelligent agent will request information from you via a tool call. You need to simulate the tool based on the tool call information and strictly return output that matches the required format.
@@ -301,7 +348,7 @@ The following is the known and established information of the virtual world so f
 - Only return what the tool would return
 
 3. Context length considerations  
-- Because the model has limited context capacity and all past query information is included in the world state, tool responses should not be excessively long  
+- Because the model has limited context capacity and all past query information is included in the world state, tool responses should not be excessively long (less than 1024 tokens) 
 - At the same time, to ensure the intelligent agent receives sufficient information, the responses must not be overly brief
 
 ### Output Format
@@ -315,6 +362,7 @@ You MUST output exactly two tagged sections:
 
 <response>
 [The tool response here - if No prior tool call found, you MUST generate a new response; Else, reponse from the tool call]
+Tool responses should not be excessively long (less than 1024 tokens)
 </response>
 
 Remember: Always check world state FIRST before generating anything new! If multiple tool calls in the world state match the current query (same tool name and similar/compatible parameters), you should **randomly select ONE** of them to reuse.
@@ -329,7 +377,8 @@ Remember: Always check world state FIRST before generating anything new! If mult
                 api_base=os.environ.get("MOCK_TOOL_API_BASE", ""),
                 api_key=os.environ.get("MOCK_TOOL_API_KEY", ""),
                 model_name="",
-                max_tokens=20480
+                max_tokens=2048,
+                api_timeout=tool_timeout
             )
 
             all_content = messages[-1]["content"]
@@ -340,21 +389,23 @@ Remember: Always check world state FIRST before generating anything new! If mult
                 last_match = tool_response_matches[-1]
                 tool_response = last_match.strip()
             else:
-                tool_response = None
+                logger.warning("Failed to parse tool response, use the raw content instead")
+                tool_response = all_content
+                # print(all_content)
             
             # Extract is_new flag
-            is_new_matches = re.findall(r"<is_new>(.+?)</is_new>", all_content, re.DOTALL)
-            is_new = False
-            if is_new_matches:
-                is_new_str = is_new_matches[-1].strip().lower()
-                is_new = is_new_str == "true"
+            # is_new_matches = re.findall(r"<is_new>(.+?)</is_new>", all_content, re.DOTALL)
+            # is_new = False
+            # if is_new_matches:
+            #     is_new_str = is_new_matches[-1].strip().lower()
+            #     is_new = is_new_str == "true"
 
-            if is_new:
-                if len(world_state) < 100:
-                    world_state.append(f"Query:\n{mock_tool_name_and_args}\nResponse:\n{tool_response}")
-                    with file_lock:
-                        with open(save_tool_call_path, "w") as f:
-                            json.dump(world_state, f, indent=4, ensure_ascii=False)
+            # if is_new:
+            #     if len(world_state) < 100:
+            #         world_state.append(f"Query:\n{mock_tool_name_and_args}\nResponse:\n{tool_response}")
+            #         with file_lock:
+            #             with open(save_tool_call_path, "w") as f:
+            #                 json.dump(world_state, f, indent=4, ensure_ascii=False)
             
             return tool_response
         
@@ -362,8 +413,7 @@ Remember: Always check world state FIRST before generating anything new! If mult
         # Act as an user
         if mock_tool_name_and_args["name"] == "mock_user":
             task_background = self._instance_dict[instance_id]["task_background"]
-            user_response = mock_user_response(task_background, history_messages)
-
+            user_response = mock_user_response(task_background, history_messages, user_timeout=timeout)
             return ToolResponse(text=user_response) if user_response else ToolResponse(text="None")
         
         # Act as a tool
@@ -372,7 +422,8 @@ Remember: Always check world state FIRST before generating anything new! If mult
 
         tool_response = mock_tool_response(
             mock_tool_name_and_args, tool_description, 
-            save_tool_call_path=self._instance_dict[instance_id]["tool_call_history_path"]
+            save_tool_call_path=self._instance_dict[instance_id]["tool_call_history_path"],
+            tool_timeout=timeout
         )
 
         return ToolResponse(text=tool_response) if tool_response else ToolResponse(text="None")
