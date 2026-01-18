@@ -1,17 +1,5 @@
 # Different models for different steps
 step_models:
-  ToolSetGenAgent:
-    name: "qwen3-235b-a22b-instruct-2507"
-    max_tokens: 10240
-    temperature: 0.9
-  FuzzyTaskAgent:
-    name: "qwen3-235b-a22b-instruct-2507"
-    max_tokens: 10240
-    temperature: 0.9
-  ToolCheckAgent:
-    name: "qwen3-235b-a22b-instruct-2507"
-    max_tokens: 10240
-    temperature: 0.9
   SolveAgent:
     name: "qwen3-235b-a22b-instruct-2507"
     max_tokens: 10240
@@ -22,15 +10,16 @@ step_models:
     temperature: 0.9
 
 processing:
-  max_workers: 1
+  max_workers: 18
   max_tasks: 10000
 
 logging:
-  task_file_path: "output/virtual_tool_use.jsonl"
-  solve_path: "output/solve_tool_use/"
+  repeat_times: 1
+  already_processed_path: "logs/solved_v3.jsonl"
+  solve_path: "output/solve_tool_use_v3/"
 
 paths:
-  data_file: "configs/persona_5K.jsonl"
+  data_file: "output/virtual_tool_use_v2.jsonl"
 
 api_configs:
   "Qwen3-235B-A22B-Instruct-2507":

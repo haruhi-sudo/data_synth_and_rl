@@ -180,6 +180,9 @@ async def rubrics_to_score(question: str, solution: str, rubrics: str):
     Use LLM to judge if the predicted answer matches the ground truth.
     Async version.
     """
+    if "###STOP" not in solution and "###TRANSFER_TO_HUMAN" not in solution:
+        return 0.0
+    
     user_prompt = f"""# Task Description
 
 {question}
@@ -206,10 +209,8 @@ Evaluate the above solution based on the provided rubrics. For each criterion, d
 - Not Completed
 
 ### Special Reminder (Important)
-When checking **Policy Compliance**, evaluate both:
-1. **Direct policy violations**
-2. **Whether the agent made tool calls with missing/uncertain parameters  
-   without asking the user first** (self-invented or assumed parameters)
+When checking **Policy Compliance**, Check whether the solution directly violates the policy — for example, if using tool A is explicitly forbidden, but the solution trace still uses tool A. However, if the steps are unrelated to the policy — for example, the policy forbids using tool A for task B, but the trace never uses tool A at all — then it is not a violation.
+
 
 This must be explicitly reflected in the evaluation.
 
@@ -218,8 +219,21 @@ This must be explicitly reflected in the evaluation.
 # Output Format
 
 <evaluation>
+Before your judgement based on the rubrics, please first give a concise judgement on the solution:
+All the think content can be read by the user, but the user dislike repeative or lengthy thinking. So the thinking content should be concise and clear.
+Agent must think before calling the tool or asking the user for clarification, otherwise the agent may make the mistake. But the thinking content should be concise and clear(3 sentences max).
+
+### Section 0
+**Name:** Concise judgement
+**Completed Items:** 1/1 or 0/1
+Judge whether the thinking content is concise and clear(3 sentences max).
 
 ## Section 1 Policy Compliance Criteria  
+### [Criterion 1 Name]
+**Status: Completed / Not Completed**
+[Explain why this criterion is completed or not completed. f the agent's behavior is not related to the policy, it is not considered as a violation.]
+
+## Section 2 Task Sub-goals and Required User Interaction
 ### [Criterion 1 Name]
 **Status: Completed / Not Completed**
 [Explain why this criterion is completed or not completed.]
@@ -230,30 +244,20 @@ This must be explicitly reflected in the evaluation.
 
 [Continue for all criteria...]
 
-## Section 2 Task Sub-goals  
-### [Criterion 1 Name]
-**Status: Completed / Not Completed**
-[Explain why this criterion is completed or not completed.]
-
-## Section 3 Required User Interaction  
-### [Criterion 1 Name]
-**Status: Completed / Not Completed**
-[Explain why this criterion is completed or not completed.]
-
 </evaluation>
 
 <section_status>
+### Section 0
+**Name:** Concise judgement
+**Completed Items:** 1/1 or 0/1
+Judge whether the thinking content is concise and clear(3 sentences max).
 
 ### Section 1
 **Name:** Policy Compliance Criteria  
 **Completed Items:** X/Y
 
 ### Section 2
-**Name:** Task Sub-goals  
-**Completed Items:** X/Y
-
-### Section 3
-**Name:** Required User Interaction  
+**Name:** Task Sub-goals and Required User Interaction  
 **Completed Items:** X/Y
 
 </section_status>
@@ -294,23 +298,19 @@ Be strict, and be strict!
         score = 0
         total_sec_count = 0
         for section in result['section_scores']:
-            if section["name"].strip().startswith("Policy"):
-                if section['total'] == 0 or section['score'] == 0:
+            if section["name"].strip().startswith("Policy") or section["name"].strip().startswith("Concise"):
+                if section['total'] == 0 or section['score'] / section['total'] != 1:
+                    # breakpoint()
                     return 0.0
                 continue
 
             if section['total'] != 0:
                 if section["name"].strip().startswith("Task"):
-                    if section['score'] / section['total'] < 0.3:
-                        return 0.0
-                    score += (0.7 * section['score'] / section['total'])
-                else:
-                    score += (0.3 * section['score'] / section['total'])
+                    score += section['score'] / section['total']
     
                 total_sec_count += 1
         # breakpoint()
-        if total_sec_count == 0:
-            print("total_sec_count is 0")
+
         return score if total_sec_count > 0 else 0.3
     
     except Exception as e:

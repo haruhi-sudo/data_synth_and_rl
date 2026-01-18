@@ -5,22 +5,23 @@ import concurrent.futures
 import os
 import argparse
 from typing import List, Dict, Any, Set
+from graph.graph_solve_task_v2 import run_agent
 
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run math tasks from a JSONL file')
-    parser.add_argument('--config', type=str, default='configs/tool_use_data_gen_v2.yaml',
-                       help='Path to the configuration file (default: configs/tool_use_data_gen.yaml)')
+    parser.add_argument('--config', type=str, default='configs/solve_task_v2.yaml',
+                       help='Path to the configuration file (default: configs/solve_task_v2.yaml)')
     args = parser.parse_args()
-
-    if args.config == 'configs/tool_use_data_gen_v2.yaml':
-        from graph.graph_virtual_tools_v2 import run_agent
-    else:
-        from graph.graph_virtual_tools import run_agent
-
+    
     # Load configuration from YAML file
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+
+    already_processed_file = config["logging"]["already_processed_path"]
+    log_dir = os.path.dirname(already_processed_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -62,23 +63,19 @@ def main():
         """Process a single task and return True if successful"""
         try:
             logger.info(f"Processing task: {task_data['id']}")
-            # Run the agent with the math problem
-            run_agent(
-                seed_info={
-                    "id": task_data['id'],
-                    "background": task_data["persona"]
-                },
-                run_config=config  # Pass the full config
-            )
+            if not task_data["checked_tools"]:
+                return False 
+
+            run_agent(task_data, run_config=config)
+            
             return True
         except Exception as e:
             logger.error(f"Error processing task {task_data['id']}: {e}")
             return False
-
     def run_tasks_from_file(config: Dict[str, Any]):
         """Run math tasks from a JSONL file with concurrent processing"""
         # Get already processed IDs
-        processed_ids = get_processed_ids(config["logging"]["task_file_path"])
+        processed_ids = get_processed_ids(config["logging"]["already_processed_path"])
         tasks_to_process: List[Dict[str, Any]] = []
         
         # Load tasks to process
@@ -87,12 +84,20 @@ def main():
                 try:
                     task_data = json.loads(line.strip())
                     
-                    # Skip if already processed
-                    if task_data['id'] in processed_ids:
-                        logger.info(f"⏭️  Skipping processed task: {task_data['id']}")
-                        continue
+                    for idx, task_and_background in enumerate(task_data["tasks_and_backgrounds"]):
+                        new_task = {
+                            "id": f"{task_data["id"]}-{idx}",
+                            "policy": task_data["policy"],
+                            "task_and_background": task_and_background,
+                            "checked_tools": task_data["checked_tools"],
+                        }
+
+                        # Skip if already processed
+                        if new_task['id'] in processed_ids:
+                            logger.info(f"⏭️  Skipping processed task: {new_task['id']}")
+                            continue
                     
-                    tasks_to_process.append(task_data)
+                        tasks_to_process.append(new_task)
                     
                     # Break if we've reached the max tasks limit
                     if config["processing"]["max_tasks"] and len(tasks_to_process) >= config["processing"]["max_tasks"]:

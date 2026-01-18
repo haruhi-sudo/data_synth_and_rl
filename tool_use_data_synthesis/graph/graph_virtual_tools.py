@@ -218,7 +218,7 @@ def mock_user_node(state: AgentState, config: RunnableConfig):
     restrict = state["restrict"]
     solve_history = state["solve_history"]
 
-    user_response = mock_user_response(cfg, fuzzy_task, task_background, restrict, solve_history)
+    user_response = mock_user_response(cfg, fuzzy_task, task_background, "", solve_history[1:]) # Exclude the system message
     solve_history.append({"role": "user", "content": user_response})
 
 

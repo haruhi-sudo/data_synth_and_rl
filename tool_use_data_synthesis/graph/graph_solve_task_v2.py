@@ -20,10 +20,11 @@ log_file_lock = threading.Lock()
 class AgentState(TypedDict):
     breaked: bool # It will be set to False when any processing step fails
 
-    fuzzy_task: str
-    checked_tools: List[Dict[str, Any]]
-    restrict: str
+    task_and_background: Dict[str, Any]
+    task_info: str
     task_background: str
+    checked_tools: List[Dict[str, Any]]
+    policy: str
 
     solve_history: List[Dict[str, Any]]
     tool_call_history: List[str]
@@ -56,11 +57,16 @@ def create_step_config(
     step_config["configurable"]["api_configs"] = base_config["configurable"]["api_configs"]
     
     return step_config
+
 def solve_task_node(state: AgentState, config: RunnableConfig):
     if state["breaked"]:
         return {
             "current_tool_call": None,
             "solve_history": None,
+            "task_finished": "Terminated"
+        }
+    if state["task_finished"] == "Terminated":
+        return {
             "task_finished": "Terminated"
         }
 
@@ -70,14 +76,25 @@ def solve_task_node(state: AgentState, config: RunnableConfig):
 
     if not len(state.get("solve_history", [])):
         checked_tools = state["checked_tools"]
-        task_info = state["fuzzy_task"]
-        restrict = state["restrict"]
+        task_info = state["task_and_background"]["task"]
+        task_background = state["task_and_background"]["user_background"]
+        restrict = state["policy"]
 
         tools_description = ""
         for tool in checked_tools:
             tools_description += json.dumps({"type": "function", "function": tool}) + "\n"
 
         system_prompt = """<policy>{restrict}</policy>
+
+### Requirements:
+1. Please call only one tool at a time, and you must provide your brief reasoning process before using any tool. You can not just give a tool call without providing your reasoning process.
+
+2. IMPORTANT: The user most likely provided insufficient information, you are encouraged to interact with the user to gather more information if needed. Before calling any tool, if **any required parameter is uncertain, missing, ambiguous, or not explicitly provided by the user**, you **MUST ask the user for clarification first**. Do NOT guess or fabricate parameters!!!
+
+3. The task can only be terminated by the user, you cannot end it yourself. However, if you believe the user's request violates policy, you may output "###TRANSFER_TO_HUMAN" to terminate the task. Use this option sparingly, it is a last resort. Always strive to resolve the issue first!
+
+4. If you have already indicated that the user's request violates policy and the user then provides new information, you should determine whether this information qualifies as an exception; if it does, continue with the task. If the user provides no new valid information and still insists on the original request, you may reply with “###TRANSFER_TO_HUMAN” to terminate the task. Use this option only when the user can no longer provide any new information.
+
 # Tools
 
 You may call one or more functions to assist with the user query.
@@ -92,14 +109,11 @@ For each function call, return a json object with function name and arguments wi
 {{"name": <function-name>, "arguments": <args-json-object>}}
 </tool_call>"""
         system_prompt = system_prompt.format(available_tools=tools_description, restrict=restrict)
-        prompt = f"""Task Description: {task_info}.
+        prompt = f"""{task_info} 
 
-### Requirements:
-1. Please call only one tool at a time, and you must provide your brief reasoning process before using any tool. You can not just give a tool call without providing your reasoning process.
+Note: Your reasoning should always be brief. All think content is visible to the user, and the user dislikes long or repetitive reasoning. Keep your thought process minimal—only short, essential reasoning when absolutely necessary.
 
-2. Once the task is complete, output the final answer, wrapping the answer in `<answer></answer>` as a termination signal. 
-
-3. IMPORTANT: The user most likely provided insufficient information, you are encouraged to interact with the user to gather more information if needed. Before calling any tool, if **any required parameter is uncertain, missing, ambiguous, or not explicitly provided by the user**, you **MUST ask the user for clarification first**. Do NOT guess or fabricate parameters!!!
+However, you must provide your brief reasoning process before using any tool or asking any information to the user. If you don't think before using a tool or asking, you're very likely to make mistakes or violate the policy.
 """
         solve_history = [
             {"role": "system", "content": system_prompt},
@@ -114,7 +128,7 @@ For each function call, return a json object with function name and arguments wi
     }
     solve_history.append(one_step_think_and_tool_call_message)
     
-    if "<answer>" not in one_step_think_and_tool_call:
+    if "###TRANSFER_TO_HUMAN" not in one_step_think_and_tool_call:
         if tool_call_info is None:
             task_finished = "Transfer to user"
         else:
@@ -155,16 +169,24 @@ def mock_user_node(state: AgentState, config: RunnableConfig):
     step_config = create_step_config(config, "MockToolAgent")
     cfg = ModelConfiguration.from_runnable_config(step_config)
 
-    fuzzy_task = state["fuzzy_task"]
-    task_background = state["task_background"]
-    restrict = state["restrict"]
+    task_info = state["task_and_background"]["task"]
+    task_background = state["task_and_background"]["user_background"]
+    test_policy = state["task_and_background"]["test_policy"]
+    if "clarification case" in test_policy:
+        test_policy = ""
     solve_history = state["solve_history"]
 
-    user_response = mock_user_response(cfg, fuzzy_task, task_background, "", solve_history[1:]) # Exclude the system message
+    user_response = mock_user_response(cfg, task_info, task_background, test_policy, solve_history[1:]) # Exclude the system message
     solve_history.append({"role": "user", "content": user_response})
 
+    if "###STOP" in user_response:
+        task_finished = "Terminated"
+    else:
+        task_finished = state["task_finished"]
+
     return {
-        "solve_history": solve_history
+        "solve_history": solve_history,
+        "task_finished": task_finished
     }
 
 def should_call_tool(state: AgentState):
@@ -226,23 +248,17 @@ def run_agent(seed_info: dict, run_config: dict = None):
         else:
             tool_call_history = []
 
-        if os.path.exists(more_info_path):
-            with open(more_info_path, 'r', encoding='utf-8') as f:
-                more_info = json.load(f)
-        else:
-            more_info = {}
 
         initial_state = {
-            "fuzzy_task": seed_info["fuzzy_task"],
+            "task_and_background": seed_info["task_and_background"],
             "checked_tools": seed_info["checked_tools"],
-            "task_background": more_info["task_background"],
-            "restrict": more_info["restrict"],
+            "policy": seed_info["policy"],
             "breaked": False,
             "task_finished": False,
             "solve_history": [],
             "tool_call_history": tool_call_history
         }
-        run_config["recursion_limit"] = 100
+        run_config["recursion_limit"] = 60
         final_state = graph.invoke(initial_state, config=run_config)
 
         solution_filename = f"{solve_path}/solution{next_number}.json"
@@ -253,6 +269,15 @@ def run_agent(seed_info: dict, run_config: dict = None):
         with open(f"{solve_path}/tool_call_history.json", 'w', encoding='utf-8') as f:
             f.write(json.dumps(final_state["tool_call_history"], ensure_ascii=False, indent=4) + '\n')
 
+        more_info = {
+            "task": final_state["task_and_background"]["task"],
+            "user_background": final_state["task_and_background"]["user_background"],
+            "agent_policy": final_state["policy"],
+            "test_policy": final_state["task_and_background"]["test_policy"],
+        }
+        with open(more_info_path, 'w', encoding='utf-8') as f:
+            f.write(json.dumps(more_info, ensure_ascii=False, indent=4) + '\n')
+
     with log_file_lock:
         # Save basic task data
         with open(already_processed_path, 'a', encoding='utf-8') as f:
@@ -262,22 +287,27 @@ def run_agent(seed_info: dict, run_config: dict = None):
 
 
 if __name__ == "__main__":
-    with open("configs/solve_task.yaml", 'r', encoding='utf-8') as f:
+    with open("configs/solve_task_v2.yaml", 'r', encoding='utf-8') as f:
         agent_config = yaml.safe_load(f)
 
     # Example usage
-    with open("output/virtual_tool_use.jsonl", 'r', encoding='utf-8') as f:
+    with open("output/virtual_tool_use_v2.jsonl", 'r', encoding='utf-8') as f:
         tasks = [json.loads(line) for line in f]
 
     for task in tasks:
-        with open(f"output/solve_tool_use/{task['id']}/tool_call_history.json", 'r', encoding='utf-8') as f:
-            tool_call_history = json.load(f)
-        
-        new_task = {
-            "id": task["id"],
-            "fuzzy_task": task["fuzzy_task"],
-            "checked_tools": task["checked_tools"],
-            "tool_call_history": tool_call_history
-        }
-        run_agent(new_task, run_config=agent_config)
+        if os.path.exists(f"output/solve_tool_use_v2/{task['id']}/tool_call_history.json"):
+            with open(f"output/solve_tool_use_v2/{task['id']}/tool_call_history.json", 'r', encoding='utf-8') as f:
+                tool_call_history = json.load(f)
+        else:
+            tool_call_history = []
 
+        for idx, task_and_background in enumerate(task["tasks_and_backgrounds"]):
+            new_task = {
+                "id": f"{task["id"]}-{idx}",
+                "policy": task["policy"],
+                "task_and_background": task_and_background,
+                "checked_tools": task["checked_tools"],
+                "tool_call_history": tool_call_history
+            }
+            run_agent(new_task, run_config=agent_config)
+        
