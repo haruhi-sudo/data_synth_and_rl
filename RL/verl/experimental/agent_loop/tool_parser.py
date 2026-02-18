@@ -115,6 +115,7 @@ class UserHermesToolParser(ToolParser):
         self.tool_call_start_token: str = "<tool_call>"
         self.tool_call_end_token: str = "</tool_call>"
         self.final_answer_token: str = "<answer>"
+        self.transfer_answer_token: str = "###TRANSFER_TO_HUMAN"
         self.tool_call_regex = regex.compile(r"<tool_call>(.*?)</tool_call>", regex.DOTALL)
 
     @rollout_trace_op
@@ -122,12 +123,18 @@ class UserHermesToolParser(ToolParser):
         loop = asyncio.get_running_loop()
         text = await loop.run_in_executor(None, self.tokenizer.decode, responses_ids)
         if self.tool_call_start_token not in text or self.tool_call_end_token not in text:
-            if self.final_answer_token in text:
+            if self.final_answer_token in text or self.transfer_answer_token in text:
                 return text, []
 
-            # agent's query to the user
-            function_calls = [FunctionCall(name="mock_user", arguments=json.dumps({"agent_query":text}, ensure_ascii=False))]
-            
+            # agent's query to the user — must contain <question> tag
+            question_matches = regex.findall(r"<question>(.*?)</question>", text, regex.DOTALL)
+            if question_matches:
+                question = question_matches[0]
+                function_calls = [FunctionCall(name="mock_user", arguments=json.dumps({"agent_query":question}, ensure_ascii=False))]
+            else:
+                logger.error("Failed to extract <question> tag from assistant response")
+                function_calls = []
+
             return text, function_calls
 
         matches = self.tool_call_regex.findall(text)

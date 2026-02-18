@@ -15,7 +15,7 @@ Multiple tool invocations are permitted. Prior to each tool invocation, you must
 
 Critical reminder: Tools operate in a stateless manner and will not preserve any variables, functions, or definitions from prior executions.
 
-Reasoning step by step, write ONLY the final answer enclosed in <answer> and </answer> tags. Do not include any extra text outside the tags after the final answer. /no_think
+Reasoning step by step, keep your thinking process concise and minimal, and write ONLY the final answer enclosed in <answer> and </answer> tags. Do not include any extra text outside the tags after the final answer. /no_think
 """
         answer = str(example["gt_answer"])
         
@@ -44,11 +44,11 @@ Reasoning step by step, write ONLY the final answer enclosed in <answer> and </a
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local_dir", default="my_data/math-hard")
+    parser.add_argument("--local_dir", default="my_data/search-tool-star")
     parser.add_argument("--train_data_source", 
-                        default="my_data/raw/reasoning/math_train_verl.json")
+                        default="my_data/tmp/raw/tool_star/toolstar30k.json")
     parser.add_argument("--test_data_source",
-                        default="my_data/raw/reasoning/aime24_val_verl.json")
+                        default="my_data/tmp/raw/tool_star/toolstar30k.json")
     
     args = parser.parse_args()
 

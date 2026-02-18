@@ -6,4 +6,10 @@ verl.egg-info
 .local.env
 logs/
 outputs/
-tool_use_data_synthesis/output/solve_tool_use/
+tool_use_data_synthesis/output/solve_tool_use*/
+dev_tools/
+workspace/
+*.log
+reasoning_data_synthesis/
+
+

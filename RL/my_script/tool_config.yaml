@@ -25,12 +25,9 @@ tools:
       
   - class_name: "my_script.tools.mock_tool.MockSandboxFusionTool"
     config:
-      sandbox_fusion_url: ""
-      sandbox_fusion_key: ""
-
-      num_workers: 128
+      num_workers: 16
       enable_global_rate_limit: true
-      rate_limit: 128
+      rate_limit: 16
 
       acquire_timeout: 90
       default_timeout: 90
