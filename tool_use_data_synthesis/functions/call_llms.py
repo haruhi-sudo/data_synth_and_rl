@@ -27,7 +27,10 @@ def call_llm_api(
         model=model_name,
         messages=messages,
         temperature=temperature,
-        extra_body={"max_completion_tokens": max_tokens},
+        extra_body={
+            # "enable_thinking": True,
+            "max_completion_tokens": max_tokens
+        },
     )
     response_content = response.choices[0].message.content
     messages.append(

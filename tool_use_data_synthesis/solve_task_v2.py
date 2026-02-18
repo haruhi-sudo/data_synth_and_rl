@@ -1,19 +1,24 @@
 import json
 import logging
+import traceback
 import yaml
 import concurrent.futures
 import os
 import argparse
 from typing import List, Dict, Any, Set
-from graph.graph_solve_task_v2 import run_agent
 
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run math tasks from a JSONL file')
-    parser.add_argument('--config', type=str, default='configs/solve_task_v2.yaml',
+    parser.add_argument('--config', type=str, default='configs/solve_task_v3.yaml',
                        help='Path to the configuration file (default: configs/solve_task_v2.yaml)')
     args = parser.parse_args()
-    
+
+    if args.config == 'configs/solve_task_v3.yaml':
+        from graph.graph_solve_task_v3 import run_agent
+    else:
+        from graph.graph_solve_task_v2 import run_agent
+
     # Load configuration from YAML file
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
@@ -70,8 +75,39 @@ def main():
             
             return True
         except Exception as e:
-            logger.error(f"Error processing task {task_data['id']}: {e}")
+            # Print the exact error location (file:line + code line) plus full traceback
+            tb = e.__traceback__
+            frames = traceback.extract_tb(tb) if tb else []
+            # Prefer the deepest frame that points to *our* repo code, not stdlib/site-packages.
+            project_root = os.path.dirname(os.path.abspath(__file__))
+            user_frames = [
+                fr for fr in frames
+                if os.path.abspath(fr.filename).startswith(project_root + os.sep)
+            ]
+            last_user_frame = user_frames[-1] if user_frames else None
+            last_frame = frames[-1] if frames else None
+
+            frame_to_report = last_user_frame or last_frame
+            if frame_to_report:
+                logger.error(
+                    "Error processing task %s: %s (at %s:%s in %s: %s)",
+                    task_data.get("id", "<unknown>"),
+                    e,
+                    frame_to_report.filename,
+                    frame_to_report.lineno,
+                    frame_to_report.name,
+                    (frame_to_report.line or "").strip(),
+                    exc_info=True,
+                )
+            else:
+                logger.error(
+                    "Error processing task %s: %s",
+                    task_data.get("id", "<unknown>"),
+                    e,
+                    exc_info=True,
+                )
             return False
+
     def run_tasks_from_file(config: Dict[str, Any]):
         """Run math tasks from a JSONL file with concurrent processing"""
         # Get already processed IDs
@@ -86,7 +122,7 @@ def main():
                     
                     for idx, task_and_background in enumerate(task_data["tasks_and_backgrounds"]):
                         new_task = {
-                            "id": f"{task_data["id"]}-{idx}",
+                            "id": f"{task_data['id']}-{idx}",
                             "policy": task_data["policy"],
                             "task_and_background": task_and_background,
                             "checked_tools": task_data["checked_tools"],

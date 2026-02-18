@@ -54,7 +54,7 @@ def mock_user_response(cfg, task, background, test_policy, interaction):
         last_match = user_response_matches[-1]
         user_response = last_match.strip()
     else:
-        user_response = None
+        user_response = all_content
 
     return user_response
 

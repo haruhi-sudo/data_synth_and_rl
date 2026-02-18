@@ -9,12 +9,14 @@ from typing import List, Dict, Any, Set
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run math tasks from a JSONL file')
-    parser.add_argument('--config', type=str, default='configs/tool_use_data_gen_v2.yaml',
+    parser.add_argument('--config', type=str, default='configs/tool_use_data_gen_v3.yaml',
                        help='Path to the configuration file (default: configs/tool_use_data_gen.yaml)')
     args = parser.parse_args()
 
     if args.config == 'configs/tool_use_data_gen_v2.yaml':
         from graph.graph_virtual_tools_v2 import run_agent
+    elif args.config == 'configs/tool_use_data_gen_v3.yaml':
+        from graph.graph_virtual_tools_v3 import run_agent
     else:
         from graph.graph_virtual_tools import run_agent
 
