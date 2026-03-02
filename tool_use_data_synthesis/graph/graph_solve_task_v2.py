@@ -3,6 +3,7 @@ import json
 import yaml
 import glob
 import re
+import copy
 import threading
 from typing import TypedDict, List, Dict, Any
 
@@ -107,13 +108,14 @@ You are provided with function signatures within <tools></tools> XML tags:
 For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
 <tool_call>
 {{"name": <function-name>, "arguments": <args-json-object>}}
-</tool_call>"""
+</tool_call>
+"""
         system_prompt = system_prompt.format(available_tools=tools_description, restrict=restrict)
         prompt = f"""{task_info} 
+Note: You must provide your brief reasoning process before using any tool or asking any information to the user. If you don't think before using a tool or asking, you're very likely to make mistakes or violate the policy. But always keep your reasoning brief. 
 
-Note: Your reasoning should always be brief. All think content is visible to the user, and the user dislikes long or repetitive reasoning. Keep your thought process minimal—only short, essential reasoning when absolutely necessary.
-
-However, you must provide your brief reasoning process before using any tool or asking any information to the user. If you don't think before using a tool or asking, you're very likely to make mistakes or violate the policy.
+When you need to ask the user for more information, you should wrap the question in <question> and </question> tags.
+Once you finsh the task, you should output the final answer, wrapping the answer in <answer></answer> tags as a termination signal. /no_think
 """
         solve_history = [
             {"role": "system", "content": system_prompt},
@@ -128,7 +130,7 @@ However, you must provide your brief reasoning process before using any tool or 
     }
     solve_history.append(one_step_think_and_tool_call_message)
     
-    if "###TRANSFER_TO_HUMAN" not in one_step_think_and_tool_call:
+    if "###TRANSFER_TO_HUMAN" not in one_step_think_and_tool_call and "</answer>" not in one_step_think_and_tool_call:
         if tool_call_info is None:
             task_finished = "Transfer to user"
         else:
@@ -165,6 +167,41 @@ def mock_tools_node(state: AgentState, config: RunnableConfig):
         "solve_history": solve_history
     }
 
+def filter_history_for_user(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter solve_history to only what's visible to the user:
+    - Remove tool response messages (user role with <tool_response> content)
+    - For assistant messages:
+        1. If <question>...</question> tags are present, use only their content
+        2. Otherwise, strip <think>...</think> and <tool_call>...</tool_call> blocks
+           and use the remaining text; skip the message if nothing remains
+    """
+    filtered = []
+    history = copy.deepcopy(history)
+    history[0]["content"] = history[0]["content"].split("\nNote: You must")[0]
+    for msg in history:
+        role = msg["role"]
+        content = msg["content"]
+
+        if role == "user":
+            if content.strip().startswith("<tool_response>"):
+                continue
+            filtered.append(msg)
+        elif role == "assistant":
+            if '<tool_call>' in content:
+                continue
+            questions = re.findall(r'<question>(.*?)</question>', content, re.DOTALL)
+            if questions:
+                visible_content = "\n".join(q.strip() for q in questions)
+            else:
+                visible_content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+                visible_content = visible_content.strip()
+
+            if visible_content:
+                filtered.append({"role": "assistant", "content": visible_content})
+
+    return filtered
+
+
 def mock_user_node(state: AgentState, config: RunnableConfig):
     step_config = create_step_config(config, "MockToolAgent")
     cfg = ModelConfiguration.from_runnable_config(step_config)
@@ -176,7 +213,8 @@ def mock_user_node(state: AgentState, config: RunnableConfig):
         test_policy = ""
     solve_history = state["solve_history"]
 
-    user_response = mock_user_response(cfg, task_info, task_background, test_policy, solve_history[1:]) # Exclude the system message
+    user_visible_history = filter_history_for_user(solve_history[1:])  # Exclude the system message
+    user_response = mock_user_response(cfg, task_info, task_background, test_policy, user_visible_history)
     solve_history.append({"role": "user", "content": user_response})
 
     if "###STOP" in user_response:
@@ -291,7 +329,7 @@ if __name__ == "__main__":
         agent_config = yaml.safe_load(f)
 
     # Example usage
-    with open("output/virtual_tool_use_v2.jsonl", 'r', encoding='utf-8') as f:
+    with open("output/tmp/virtual_tool_use_v2.jsonl", 'r', encoding='utf-8') as f:
         tasks = [json.loads(line) for line in f]
 
     for task in tasks:

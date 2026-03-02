@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Set
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Run math tasks from a JSONL file')
-    parser.add_argument('--config', type=str, default='configs/solve_task_v3.yaml',
+    parser.add_argument('--config', type=str, default='configs/solve_task_v2.yaml',
                        help='Path to the configuration file (default: configs/solve_task_v2.yaml)')
     args = parser.parse_args()
 

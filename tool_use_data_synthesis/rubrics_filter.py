@@ -107,19 +107,17 @@ For user interactions, define:
 
 (No scoring required — only criteria.)
 
-## Step 4: Evaluate the Example Solutions
+## Step 4: Score the Example Solutions
 
-Evaluate the example solutions based on the rubrics.
+Score the example solutions strictly according to the rubrics defined in Step 3.
 
-For each example solution, evaluate:
-- Whether it follows the policy compliance standards
-- Whether it completes all required sub-goals
-- Whether it interacts sufficiently with the user
-- Overall logic, quality, and feasibility
+For each example solution:
+- **Policy Compliance**: State whether the solution violates any policy, and cite the specific policy if so.
+- **Sub-goal Completion**: For each sub-goal listed in the rubrics, explicitly state whether it was completed, partially completed, or not completed, with a brief justification.
+- **User Interaction**: Assess whether the agent asked all required questions and whether the interactions were sufficient.
+- **Overall Score**: Count how many rubric criteria (sub-goals + required user interactions) were fully completed, and express the result as a fraction, e.g. `5/10`. A criterion counts as completed only if it is fully met; partial completion does not count. If a policy violation is present, all criteria that depend on the violated step are counted as not completed.
 
-Use markdown for clarity.
-
-Write your analysis inside the <evaluation></evaluation> tags. And determine whether keep the example for training or not.
+Write your scoring inside the <evaluation></evaluation> tags.
 
 ---
 
@@ -140,12 +138,12 @@ Please keep the sub‑goals(What tools will be used to achieve what goals) and u
 </rubrics>
 
 <evaluation>
-[Markdown analysis of the example solutions]
+[For each example solution, score each rubric dimension with justification, then provide an Overall Score (1–10)]
 </evaluation>
 
-<keep_or_not>
-[Whether keep the example for training or not]
-</keep_or_not>
+<score>
+[Fraction of completed criteria, e.g. 5/10, If a policy violation is present, the score should be 0]
+</score>
 
 ---
 
@@ -244,18 +242,21 @@ def format_trajectory_for_comparison(file_name: str, trajectory: List[Dict]) -> 
         if role == "system":
             continue  # Skip system message (too long)
         elif role == "user":
-            if i == 1:
-                simplified += f"\n[User Request]\n{content[:800]}...\n"
-            elif "tool_response" in content or role == "tool":
+            if "</tool_response>" not in content:
+                simplified += f"\n[User-Step{i//2}]\n{content[:800]}...\n"
+            else:
                 simplified += f"\n[Tool Response]\n{content[:500]}...\n"
         elif role == "assistant":
             # Extract reasoning and tool calls
             if "<tool_call>" in content:
                 reasoning = content.split("<tool_call>")[0].strip()
                 tool_part = content[content.find("<tool_call>"):content.find("</tool_call>")+12]
-                simplified += f"\n[Assistant-Step{i//2}]\nReasoning: {reasoning[:800]}...\nTool Call: {tool_part}\n"
+                # simplified += f"\n[Assistant-Step{i//2}]\nReasoning: {reasoning[:800]}...\nTool Call: {tool_part}\n"
+                simplified += f"\n[Assistant-Step{i//2}]\nTool Call: {tool_part}\n"
             else:
-                simplified += f"\n[Assistant-Final Answer]\n{content[:1000]}...\n"
+                reasoning = content.split("<question>")[0].strip()
+                question = content.split("<question>")[-1].split("</question>")[0].strip()
+                simplified +=  f"\n[Assistant-Step{i//2}]\nAsk the user: {question}\n"
 
     return simplified
 
@@ -305,7 +306,7 @@ def parse_llm_response(response_content: str) -> Dict[str, str]:
         "reasoning": "",
         "rubrics": "",
         "evaluation": "",
-        "keep_or_not": "",
+        "score": "",
     }
     # Extract alignment_check
     first_check_match = re.search(r'<first_check>(.*?)</first_check>', response_content, re.DOTALL)
@@ -334,11 +335,11 @@ def parse_llm_response(response_content: str) -> Dict[str, str]:
     else:
         logger.warning("Evaluation section not found in response")
     
-    keep_or_not_match = re.search(r'<keep_or_not>(.*?)</keep_or_not>', response_content, re.DOTALL)
-    if keep_or_not_match:
-        result["keep_or_not"] = keep_or_not_match.group(1).strip()
+    score_match = re.search(r'<score>(.*?)</score>', response_content, re.DOTALL)
+    if score_match:
+        result["score"] = score_match.group(1).strip()
     else:
-        logger.warning("Keep or not section not found in response")
+        logger.warning("Score section not found in response")
 
     return result
 

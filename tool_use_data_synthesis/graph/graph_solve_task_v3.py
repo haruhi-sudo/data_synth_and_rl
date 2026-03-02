@@ -113,10 +113,10 @@ For each function call, return a json object with function name and arguments wi
 </tool_call>"""
         system_prompt = system_prompt.format(available_tools=tools_description, restrict=restrict)
         prompt = f"""{task_info} 
+Note: You must provide your brief reasoning process before using any tool or asking any information to the user. If you don't think before using a tool or asking, you're very likely to make mistakes or violate the policy. But always keep your reasoning brief. 
 
-Note: Your reasoning should always be brief. All think content is visible to the user, and the user dislikes long or repetitive reasoning. Keep your thought process minimal—only short, essential reasoning when absolutely necessary.
-
-However, you must provide your brief reasoning process before using any tool or asking any information to the user. If you don't think before using a tool or asking, you're very likely to make mistakes or violate the policy.
+When you need to ask the user for more information, you should wrap the question in <question> and </question> tags.
+Once you finsh the task, you should output the final answer, wrapping the answer in <answer></answer> tags as a termination signal. /no_think
 """
         solve_history = [
             {"role": "system", "content": system_prompt},

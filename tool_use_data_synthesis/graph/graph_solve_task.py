@@ -266,7 +266,7 @@ if __name__ == "__main__":
         agent_config = yaml.safe_load(f)
 
     # Example usage
-    with open("output/virtual_tool_use.jsonl", 'r', encoding='utf-8') as f:
+    with open("output/tmp/virtual_tool_use.jsonl", 'r', encoding='utf-8') as f:
         tasks = [json.loads(line) for line in f]
 
     for task in tasks:
