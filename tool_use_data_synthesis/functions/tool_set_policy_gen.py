@@ -1,11 +1,18 @@
 import re
-from .call_llms import call_llm_api
+import json
+from functions import call_llm_api
+
+with open("functions/example.json", "r") as f:
+  tool_call_example = json.load(f)
 
 tool_set_prompt = """You are an expert capable of creating complex tool-use tasks and designing executable strategic rules.
 
 Task Objective:  
 Based on the provided background information, design a complex but realistically feasible task that requires at least two different tools working together.  
+
 You must also design several virtual tools and define their input/output schemas.  
+Note: The completion of the tool-calling task will be judged by checking the state changes before and after tool execution. Therefore, ensure that the tools and tasks you design involve state‑modifying or otherwise objectively verifiable actions. (For example, booking a flight can be verified by checking database changes, but writing a research report cannot be objectively evaluated.)
+
 Finally, produce a tree-based policy that describes the agent's allowed behaviors, prohibited actions, tool preconditions, and refusal rules across different scenarios.
 
 Notes:  
@@ -14,9 +21,10 @@ In some scenarios, the agent should be able to execute the task; in others, it m
 
 Complexity Requirements:
 
-1. The task must involve information gathering, processing, or creative generation, and require 3–5 different categories of tools working together.
+1. Before constructing the task, you must guarantee that the task can be evaluated by the state changes objectively, and require 3–5 different categories of tools working together.
 
 2. Tools must be based on real-world technologies. They may be hypothetical virtual tools, but their functionality must be clear and limited in scope.
+The types of tools should include writing to a database, querying information, deleting information, and modifying information, but should not include content‑generation APIs, because they make it difficult to evaluate whether the task has been completed.
 
 3. Tools must include explicit input/output structures (field names, types, descriptions).
 
@@ -36,15 +44,16 @@ Note that you should not impose any restrictions on the order of task completion
 Reasoning Steps:
 
 1. Background Analysis  
-   - Infer possible user goals based on the background  
+   - Infer possible user goals based on the background
    - List 2–3 feasible high-level task directions  
-   - Choose the most complex one suited for multi-tool collaboration
+   - Choose the most complex one suited for multi-tool collaboration, and it can be evaluated by the state changes objectively.
 
 2. Task Definition  
    - Describe the complex task: its goal, context, and key challenges
 
-3. Tool List Design  
+3. Tool List Design
 Design 3–5 tools.  
+The types of tools should include writing to a database, querying information, deleting information, and modifying information, but should not include content‑generation APIs, because they make it difficult to evaluate whether the task has been completed.
 Each tool must include: name, description, parameters, outputs using this format:
 
 {{
@@ -73,8 +82,12 @@ Each tool must include: name, description, parameters, outputs using this format
     }}
 }}
 
+IMPORTANT: The arguments of a tool should be less or equal to 3.
+
 4. Tree-based Policy (Core Part)  
 Produce a JSON policy tree containing:
+
+Example tree based policy:
 
 - "root_condition": top-level trigger condition  
 - "allowed_actions"  
@@ -92,92 +105,150 @@ Produce a JSON policy tree containing:
 The policy does not need to cover every real-world scenario but must be sufficiently complex and multi-layered.
 
 {{
-  "root_condition": "User requests an analytical briefing regarding the political or constitutional legitimacy of a specified election event.",
+  "root_condition": "User requests help with booking, modifying, canceling flights, or requesting refunds/compensation.",
 
   "allowed_actions": [
-    "Use legal_doc_retriever for constitutional or judicial materials",
-    "Use news_aggregator on vetted and neutral news categories",
-    "Use sentiment_analyzer with geographic+language filters",
-    "Use fact_checker on specific factual claims",
-    "Ask clarifying questions when key details are missing",
-    "Synthesize information into a neutral, sourced summary"
+    "Ask for required identifiers (user id, reservation id).",
+    "Collect required booking or modification details.",
+    "Use booking/modify/cancel/refund tools after explicit user confirmation.",
+    "Provide factual, policy-based information only.",
+    "Transfer to human agent when the case is outside allowed actions."
   ],
 
   "disallowed_actions": [
-    "Make normative or moral judgments",
-    "Predict future political events",
-    "Cite unverified or anonymous sources",
-    "Use tools with missing preconditions",
-    "Invoke tools in the wrong sequence"
+    "Perform actions without explicit user confirmation before database updates.",
+    "Provide subjective opinions or information not from tools or user input.",
+    "Make simultaneous tool calls and user responses.",
+    "Modify reservation passenger count.",
+    "Modify basic economy flights.",
+    "Add insurance after initial booking."
   ],
 
   "clarification_required": [
-    "Missing event date",
-    "Missing jurisdiction",
-    "User mixes unrelated countries/events"
+    "Missing user id.",
+    "Missing reservation id (when modifying/canceling).",
+    "Incomplete booking details (trip type, origin, destination, cabin, passengers).",
+    "Missing cancellation reason.",
+    "Missing payment method details."
   ],
 
   "tool_preconditions": {{
-    "legal_doc_retriever": {{ "must_have": ["valid_date_range", "jurisdiction"] }},
-    "news_aggregator": {{ "must_have": ["approved_outlet_types"] }},
-    "sentiment_analyzer": {{ "must_have": ["geo_filter", "language_filter"] }},
-    "fact_checker": {{ "must_have": ["falsifiable_claim"] }}
+    "booking_tools": {{ "must_have": ["user id", "trip details", "passenger info", "payment method", "explicit confirmation"] }},
+    "modify_tools": {{ "must_have": ["user id", "reservation id", "rule-compliant changes", "explicit confirmation"] }},
+    "cancel_tools": {{ "must_have": ["user id", "reservation id", "valid cancellation condition", "explicit confirmation"] }},
+    "refund_compensation_tools": {{ "must_have": ["verified facts", "eligible membership/ticket class"] }},
+    "transfer_to_human_agents": {{ "must_have": ["task outside policy scope"] }}
   }},
 
   "refusal_conditions": [
-    "User asks for normative judgment",
-    "User presents conspiracy theories",
-    "User requests real‑time polling data"
+    "User attempts action that violates fare rules (e.g., modify basic economy).",
+    "User requests prohibited behavior (adding insurance post‑booking, removing bags, etc.).",
+    "User requests subjective advice or information not allowed.",
+    "User requests tool usage without required preconditions."
   ],
 
   "transfer_conditions": [
-    "Legal documents conflict without clear resolution",
-    "Fact-checker repeatedly returns 'unverifiable'",
-    "Sentiment analysis shows extreme geographic or demographic bias"
+    "Flight already partially flown and user wants modification or cancellation.",
+    "Cancellation request invalid but user insists.",
+    "Passenger count modification requested.",
+    "Policy conflict the agent cannot resolve."
   ],
 
   "branches": [
 
     {{
-      "condition": "User explicitly requests a normative judgment (e.g., moral legitimacy)",
-      "action": "refuse",
-      "next": null
-    }},
-
-    {{
-      "condition": "User query missing jurisdiction or event date",
-      "action": "clarify",
-      "next": null
-    }},
-
-    {{
-      "condition": "User provides clear factual request with jurisdiction + date specified",
+      "condition": "User requests flight booking",
       "action": "proceed",
       "next": [
         {{
-          "condition": "Legal documents retrieved successfully",
-          "action": "continue_sequence",
+          "condition": "Missing booking prerequisites (user id, trip details, passengers, payment)",
+          "action": "clarify",
           "next": null
         }},
         {{
-          "condition": "Legal retrieval fails or contradicts itself",
-          "action": "transfer",
-          "next": null
+          "condition": "All prerequisites met",
+          "action": "request_confirmation",
+          "next": [
+            {{
+              "condition": "User confirms",
+              "action": "tool_call: booking_tools",
+              "next": null
+            }},
+            {{
+              "condition": "User declines",
+              "action": "abort",
+              "next": null
+            }}
+          ]
         }}
       ]
     }},
 
     {{
-      "condition": "User mixes unrelated geopolitical events (e.g., references two countries' elections together)",
-      "action": "clarify",
+      "condition": "User requests modification of an existing reservation",
+      "action": "proceed",
       "next": [
         {{
-          "condition": "User provides corrected and consistent scope",
-          "action": "proceed",
+          "condition": "Missing user id or reservation id",
+          "action": "clarify",
           "next": null
         }},
         {{
-          "condition": "User refuses to clarify scope",
+          "condition": "User requests forbidden modification (basic economy flight change, passenger count change, etc.)",
+          "action": "refuse",
+          "next": null
+        }},
+        {{
+          "condition": "Modification allowed by rules",
+          "action": "request_confirmation",
+          "next": [
+            {{
+              "condition": "User confirms",
+              "action": "tool_call: modify_tools",
+              "next": null
+            }},
+            {{
+              "condition": "User declines",
+              "action": "abort",
+              "next": null
+            }}
+          ]
+        }}
+      ]
+    }},
+
+    {{
+      "condition": "User requests flight cancellation",
+      "action": "proceed",
+      "next": [
+        {{
+          "condition": "Missing user id or reservation id",
+          "action": "clarify",
+          "next": null
+        }},
+        {{
+          "condition": "Flight already flown",
+          "action": "transfer",
+          "next": null
+        }},
+        {{
+          "condition": "Cancellation conditions allowed",
+          "action": "request_confirmation",
+          "next": [
+            {{
+              "condition": "User confirms",
+              "action": "tool_call: cancel_tools",
+              "next": null
+            }},
+            {{
+              "condition": "User declines",
+              "action": "abort",
+              "next": null
+            }}
+          ]
+        }},
+        {{
+          "condition": "Cancellation conditions not met",
           "action": "refuse",
           "next": null
         }}
@@ -185,45 +256,50 @@ The policy does not need to cover every real-world scenario but must be sufficie
     }},
 
     {{
-      "condition": "User provides complete event details + valid jurisdiction",
+      "condition": "User requests refunds or compensation",
       "action": "proceed",
       "next": [
         {{
-          "condition": "Legal documents are consistent and meet preconditions",
-          "action": "continue_sequence",
+          "condition": "User does not provide necessary facts",
+          "action": "clarify",
+          "next": null
+        }},
+        {{
+          "condition": "User not eligible based on membership/ticket/insurance rules",
+          "action": "refuse",
+          "next": null
+        }},
+        {{
+          "condition": "User eligible and facts confirmed",
+          "action": "request_confirmation",
           "next": [
             {{
-              "condition": "News aggregator produces coherent multi-source coverage",
-              "action": "continue_sequence",
-              "next": [
-                {{
-                  "condition": "Sentiment analysis shows balanced geographic signals",
-                  "action": "allowed",
-                  "next": null
-                }},
-                {{
-                  "condition": "Sentiment analysis shows severe bias",
-                  "action": "refuse",
-                  "next": null
-                }}
-              ]
+              "condition": "User confirms",
+              "action": "tool_call: refund_compensation_tools",
+              "next": null
             }},
             {{
-              "condition": "News sources inconsistent or flagged unreliable",
-              "action": "refuse",
+              "condition": "User declines",
+              "action": "abort",
               "next": null
             }}
           ]
-        }},
-        {{
-          "condition": "Legal documents conflicting or missing",
-          "action": "transfer",
-          "next": null
         }}
       ]
+    }},
+
+    {{
+      "condition": "User asks for something outside the policy scope",
+      "action": "transfer",
+      "next": null
     }}
+
   ]
 }}
+
+----------------------------------------
+Example Task: {tool_call_example}
+----------------------------------------
 
 ----------------------------------------
 Background Information: {background_info}
@@ -232,20 +308,22 @@ Background Information: {background_info}
 ----------------------------------------
 Final Output Format (must follow strictly):
 
+## Reasoning Step
 <reasoning>step-by-step reasoning…</reasoning>
 
 ## 1. Task Description
 <task>(task description)</task>
 
 ## 2. Tool List (JSON)
-<tools>(tools JSON list)</tools>
+<tools>(tools JSON list), The arguments of a tool should be less or equal to 3.</tools>
 
 ## 3. Tree-based Policy (JSON)
 <policy_tree>(policy tree JSON)</policy_tree>
 """
 
 def generate_tool_set_policy(cfg, background_info):
-    prompt = tool_set_prompt.format(background_info=background_info)
+    # background_info = "Airline (user can cancel, modify, or refund their reservation. But the policy is complex, not all actions are allowed.)"
+    prompt = tool_set_prompt.format(background_info=background_info, tool_call_example=tool_call_example)
     messages = call_llm_api(
         user_prompt=prompt,
         system_prompt="",
@@ -290,42 +368,23 @@ if __name__ == "__main__":
     from langchain_core.runnables import RunnableConfig
     from configuration import ModelConfiguration
 
-    with open("configs/tool_use_data_gen.yaml", "r") as f:
+    with open("configs/data_gen.yaml", "r") as f:
         cfg = yaml.safe_load(f)
 
     task_bg = "A maternal health advocate focused on raising awareness about postpartum complications."
-    def create_step_config(
-        base_config: RunnableConfig, step_name: str, 
-    ) -> RunnableConfig:
-        """Create a new configuration for a specific step with its designated model"""
-        # cfg = AgentConfiguration.from_runnable_config(base_config)
-        step_model_config = base_config["step_models"][step_name]
-        
-        # Create a new config with the specific model for this step
-        step_config = {}
-        if "configurable" not in step_config:
-            step_config["configurable"] = {}
-            
-        # Apply the step-specific model configuration
-        step_config["configurable"]["model_name"] = step_model_config["name"]
-        if "temperature" in step_model_config:
-            step_config["configurable"]["temperature"] = step_model_config["temperature"]
-        if "max_tokens" in step_model_config:
-            step_config["configurable"]["max_tokens"] = step_model_config["max_tokens"]
-        if "use_tools" in step_model_config:
-            step_config["configurable"]["use_tools"] = step_model_config["use_tools"]
-        if "use_thinking" in step_model_config:
-            step_config["configurable"]["use_thinking"] = step_model_config["use_thinking"]
+    _STEP_CONFIG_KEYS = ("model_name", "temperature", "max_tokens")
 
-        step_config["configurable"]["api_configs"] = base_config["api_configs"]
-        
-        return step_config
+    def create_step_config(base_config, step_name):
+        step_model = base_config["step_models"][step_name]
+        configurable = {k: v for k, v in step_model.items() if k in _STEP_CONFIG_KEYS}
+        configurable["api_configs"] = base_config["api_configs"]
+        return {"configurable": configurable}
 
-    with open("configs/tool_use_data_gen.yaml", 'r', encoding='utf-8') as f:
+    with open("configs/data_gen.yaml", 'r', encoding='utf-8') as f:
         agent_config = yaml.safe_load(f)
     
     step_config = create_step_config(agent_config, "ToolSetGenAgent")
     cfg = ModelConfiguration.from_runnable_config(step_config)
 
-    generate_tool_set(cfg, task_bg)
+    generate_tool_set_policy(cfg, task_bg)
 

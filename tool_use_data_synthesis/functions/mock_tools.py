@@ -120,34 +120,15 @@ if __name__ == "__main__":
     for tool in tools_format:
         tools_description += json.dumps({"type": "function", "function": tool}) + "\n"
 
-    def create_step_config(
-        base_config: RunnableConfig, step_name: str, 
-    ) -> RunnableConfig:
-        """Create a new configuration for a specific step with its designated model"""
-        # cfg = AgentConfiguration.from_runnable_config(base_config)
-        step_model_config = base_config["step_models"][step_name]
-        
-        # Create a new config with the specific model for this step
-        step_config = {}
-        if "configurable" not in step_config:
-            step_config["configurable"] = {}
-            
-        # Apply the step-specific model configuration
-        step_config["configurable"]["model_name"] = step_model_config["name"]
-        if "temperature" in step_model_config:
-            step_config["configurable"]["temperature"] = step_model_config["temperature"]
-        if "max_tokens" in step_model_config:
-            step_config["configurable"]["max_tokens"] = step_model_config["max_tokens"]
-        if "use_tools" in step_model_config:
-            step_config["configurable"]["use_tools"] = step_model_config["use_tools"]
-        if "use_thinking" in step_model_config:
-            step_config["configurable"]["use_thinking"] = step_model_config["use_thinking"]
+    _STEP_CONFIG_KEYS = ("model_name", "temperature", "max_tokens")
 
-        step_config["configurable"]["api_configs"] = base_config["api_configs"]
-        
-        return step_config
+    def create_step_config(base_config, step_name):
+        step_model = base_config["step_models"][step_name]
+        configurable = {k: v for k, v in step_model.items() if k in _STEP_CONFIG_KEYS}
+        configurable["api_configs"] = base_config["api_configs"]
+        return {"configurable": configurable}
 
-    with open("configs/tool_use_data_gen.yaml", 'r', encoding='utf-8') as f:
+    with open("configs/data_gen.yaml", 'r', encoding='utf-8') as f:
         agent_config = yaml.safe_load(f)
     
     step_config = create_step_config(agent_config, "FuzzyTaskAgent")

@@ -10,10 +10,9 @@ from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableConfig
 
 from configuration import ModelConfiguration
-from functions import (
-    generate_tool_set_policy, generate_policy_test_case, 
-    generate_task_and_user_background, tool_check
-)
+from functions.policy_task import generate_policy_test_case
+from functions.tool_set_policy_gen import generate_tool_set_policy
+from functions.refine_policy_task import generate_task_and_user_background
 
 # Add a lock for thread-safe file writing
 log_file_lock = threading.Lock()
@@ -34,32 +33,16 @@ class AgentState(TypedDict):
     tasks_and_backgrounds: List[Dict[str, Any]]
 
 
-def create_step_config(
-        base_config: RunnableConfig, step_name: str, 
-    ) -> RunnableConfig:
-    """Create a new configuration for a specific step with its designated model"""
-    # cfg = AgentConfiguration.from_runnable_config(base_config)
-    step_model_config = base_config["configurable"]["step_models"][step_name]
-    
-    # Create a new config with the specific model for this step
-    step_config = {}
-    if "configurable" not in step_config:
-        step_config["configurable"] = {}
-        
-    # Apply the step-specific model configuration
-    step_config["configurable"]["model_name"] = step_model_config["name"]
-    if "temperature" in step_model_config:
-        step_config["configurable"]["temperature"] = step_model_config["temperature"]
-    if "max_tokens" in step_model_config:
-        step_config["configurable"]["max_tokens"] = step_model_config["max_tokens"]
-    if "use_tools" in step_model_config:
-        step_config["configurable"]["use_tools"] = step_model_config["use_tools"]
-    if "use_thinking" in step_model_config:
-        step_config["configurable"]["use_thinking"] = step_model_config["use_thinking"]
+_STEP_CONFIG_KEYS = ("model_name", "temperature", "max_tokens")
 
-    step_config["configurable"]["api_configs"] = base_config["configurable"]["api_configs"]
-    
-    return step_config
+def create_step_config(
+    base_config: RunnableConfig, step_name: str,
+) -> RunnableConfig:
+    """Create a new configuration for a specific step with its designated model."""
+    step_model = base_config["configurable"]["step_models"][step_name]
+    configurable = {k: v for k, v in step_model.items() if k in _STEP_CONFIG_KEYS}
+    configurable["api_configs"] = base_config["configurable"]["api_configs"]
+    return {"configurable": configurable}
 
 def toolset_gen_node(state: AgentState, config: RunnableConfig):
     # Create step-specific configuration
@@ -85,35 +68,6 @@ def toolset_gen_node(state: AgentState, config: RunnableConfig):
         "initial_policy": policy
     }
 
-
-def check_tools_node(state: AgentState, config: RunnableConfig):
-    if state["breaked"]:
-        return {
-            "checked_tools": None
-        }
-
-    # Create step-specific configuration
-    step_config = create_step_config(config, "ToolCheckAgent")
-    cfg = ModelConfiguration.from_runnable_config(step_config)
-
-    initial_tools = state["initial_tools"]
-    task_description = state["initial_task"]
-    checked_tools = tool_check(cfg, initial_tools, task_description)
-
-    try:
-        checked_tools = json.loads(checked_tools)
-    except:
-        print(f"Error: The checked_tools is not a valid JSON string: {checked_tools}")
-        return {
-            "breaked": True,
-            "checked_tools": None
-        }
-    
-    return {
-        "checked_tools": checked_tools
-    }
-
-
 def policy_task_node(state: AgentState, config: RunnableConfig):
     if state["breaked"]:
         return {
@@ -126,10 +80,20 @@ def policy_task_node(state: AgentState, config: RunnableConfig):
     
     task_description = state["initial_task"]
     policy_tree = state["initial_policy"]
-    tools = state["checked_tools"]
+    tools = state["initial_tools"]
+    try:
+        tools = json.loads(tools)
+    except:
+        print(f"Error: The tools is not a valid JSON string: {tools}")
+        return {
+            "breaked": True,
+            "policy_str": None,
+            "test_cases": None
+        }
     all_content, policy, test_cases_task_bg_policy = generate_policy_test_case(cfg, task_description, policy_tree, tools)
     
     return {
+        "checked_tools": tools,
         "policy_str": policy,
         "test_cases": test_cases_task_bg_policy
     }
@@ -148,10 +112,7 @@ def final_task_node(state: AgentState, config: RunnableConfig):
 
     task_and_user_background = generate_task_and_user_background(cfg, tools, test_cases)
 
-    try:
-        task_and_user_background = json.loads(task_and_user_background)
-    except:
-        print(f"Error: The task_and_user_background is not a valid JSON string: {task_and_user_background}")
+    if len(task_and_user_background) == 0 or task_and_user_background is None:
         return {
             "breaked": True,
             "tasks_and_backgrounds": None
@@ -166,11 +127,9 @@ builder = StateGraph(AgentState, config_schema=RunnableConfig)
 builder.add_node("toolset_gen", toolset_gen_node)
 builder.add_node("policy_task", policy_task_node)
 builder.add_node("final_task", final_task_node)
-builder.add_node("check_tools", check_tools_node)
 
 builder.set_entry_point("toolset_gen")
-builder.add_edge("toolset_gen", "check_tools")
-builder.add_edge("check_tools", "policy_task")
+builder.add_edge("toolset_gen", "policy_task")
 builder.add_edge("policy_task", "final_task")
 graph = builder.compile()
 
@@ -208,7 +167,7 @@ def run_agent(seed_info: dict, run_config: dict = None):
 
 
 if __name__ == "__main__":
-    with open("configs/tool_use_data_gen_v2.yaml", 'r', encoding='utf-8') as f:
+    with open("configs/data_gen.yaml", 'r', encoding='utf-8') as f:
         agent_config = yaml.safe_load(f)
 
     # Example usage

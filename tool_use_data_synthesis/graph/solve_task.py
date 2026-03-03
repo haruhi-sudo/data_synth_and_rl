@@ -32,32 +32,16 @@ class AgentState(TypedDict):
     current_tool_call: str
     task_finished: str
 
-def create_step_config(
-        base_config: RunnableConfig, step_name: str, 
-    ) -> RunnableConfig:
-    """Create a new configuration for a specific step with its designated model"""
-    # cfg = AgentConfiguration.from_runnable_config(base_config)
-    step_model_config = base_config["configurable"]["step_models"][step_name]
-    
-    # Create a new config with the specific model for this step
-    step_config = {}
-    if "configurable" not in step_config:
-        step_config["configurable"] = {}
-        
-    # Apply the step-specific model configuration
-    step_config["configurable"]["model_name"] = step_model_config["name"]
-    if "temperature" in step_model_config:
-        step_config["configurable"]["temperature"] = step_model_config["temperature"]
-    if "max_tokens" in step_model_config:
-        step_config["configurable"]["max_tokens"] = step_model_config["max_tokens"]
-    if "use_tools" in step_model_config:
-        step_config["configurable"]["use_tools"] = step_model_config["use_tools"]
-    if "use_thinking" in step_model_config:
-        step_config["configurable"]["use_thinking"] = step_model_config["use_thinking"]
+_STEP_CONFIG_KEYS = ("model_name", "temperature", "max_tokens")
 
-    step_config["configurable"]["api_configs"] = base_config["configurable"]["api_configs"]
-    
-    return step_config
+def create_step_config(
+    base_config: RunnableConfig, step_name: str,
+) -> RunnableConfig:
+    """Create a new configuration for a specific step with its designated model."""
+    step_model = base_config["configurable"]["step_models"][step_name]
+    configurable = {k: v for k, v in step_model.items() if k in _STEP_CONFIG_KEYS}
+    configurable["api_configs"] = base_config["configurable"]["api_configs"]
+    return {"configurable": configurable}
 
 def solve_task_node(state: AgentState, config: RunnableConfig):
     if state["breaked"]:
@@ -77,8 +61,8 @@ def solve_task_node(state: AgentState, config: RunnableConfig):
 
     if not len(state.get("solve_history", [])):
         checked_tools = state["checked_tools"]
-        task_info = state["task_and_background"][0]["task"]
-        task_background = state["task_and_background"][0]["user_background"]
+        task_info = state["task_and_background"]["task"]
+        task_background = state["task_and_background"]["user_background"]
         restrict = state["policy"]
 
         tools_description = ""
@@ -125,7 +109,7 @@ Once you finsh the task, you should output the final answer, wrapping the answer
     else:
         solve_history = state["solve_history"]
 
-    key_expected_tool_return = state["task_and_background"][0]["tool_return_expected"]
+    key_expected_tool_return = state["task_and_background"]["tool_return_expected"]
     one_step_think_and_tool_call, tool_call_info = solve_task_by_tools(cfg, solve_history)
     one_step_think_and_tool_call_message = {
         "role": "assistant", "content": one_step_think_and_tool_call
@@ -175,10 +159,10 @@ def mock_user_node(state: AgentState, config: RunnableConfig):
     step_config = create_step_config(config, "MockToolAgent")
     cfg = ModelConfiguration.from_runnable_config(step_config)
 
-    task_info = state["task_and_background"][0]["task"]
-    task_background = state["task_and_background"][0]["user_background"]
-    test_policy = state["task_and_background"][0]["test_policy"]
-    user_escape_strategy = state["task_and_background"][0]["user_escape_strategy"]
+    task_info = state["task_and_background"]["task"]
+    task_background = state["task_and_background"]["user_background"]
+    test_policy = state["task_and_background"]["test_policy"]
+    user_escape_strategy = state["task_and_background"]["user_escape_strategy"]
     if "clarification case" in test_policy:
         test_policy = ""
     solve_history = state["solve_history"]
@@ -281,13 +265,13 @@ def run_agent(seed_info: dict, run_config: dict = None):
             f.write(json.dumps(final_state["tool_call_history"], ensure_ascii=False, indent=4) + '\n')
 
         more_info = {
-            "task": final_state["task_and_background"][0]["task"],
-            "user_background": final_state["task_and_background"][0]["user_background"],
+            "task": final_state["task_and_background"]["task"],
+            "user_background": final_state["task_and_background"]["user_background"],
             "agent_policy": final_state["policy"],
-            "test_policy": final_state["task_and_background"][0]["test_policy"],
-            "user_escape_strategy": final_state["task_and_background"][0]["user_escape_strategy"],
-            "tool_return_expected": final_state["task_and_background"][0]["tool_return_expected"],
-            "evaluation": final_state["task_and_background"][0]["evaluation"],
+            "test_policy": final_state["task_and_background"]["test_policy"],
+            "user_escape_strategy": final_state["task_and_background"]["user_escape_strategy"],
+            "tool_return_expected": final_state["task_and_background"]["tool_return_expected"],
+            "evaluation": final_state["task_and_background"]["evaluation"],
         }
         with open(more_info_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(more_info, ensure_ascii=False, indent=4) + '\n')
@@ -301,7 +285,7 @@ def run_agent(seed_info: dict, run_config: dict = None):
 
 
 if __name__ == "__main__":
-    with open("configs/solve_task_v3.yaml", 'r', encoding='utf-8') as f:
+    with open("configs/solve_task.yaml", 'r', encoding='utf-8') as f:
         agent_config = yaml.safe_load(f)
 
     # Example usage

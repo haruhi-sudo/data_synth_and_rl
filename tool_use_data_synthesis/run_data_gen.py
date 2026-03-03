@@ -1,6 +1,5 @@
 import json
 import logging
-import traceback
 import yaml
 import concurrent.futures
 import os
@@ -8,25 +7,16 @@ import argparse
 from typing import List, Dict, Any, Set
 
 def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Run math tasks from a JSONL file')
-    parser.add_argument('--config', type=str, default='configs/solve_task_v2.yaml',
-                       help='Path to the configuration file (default: configs/solve_task_v2.yaml)')
+    parser = argparse.ArgumentParser(description='Run data generation tasks from a JSONL file')
+    parser.add_argument('--config', type=str, default='configs/data_gen.yaml',
+                       help='Path to the configuration file (default: configs/data_gen.yaml)')
     args = parser.parse_args()
 
-    if args.config == 'configs/solve_task_v3.yaml':
-        from graph.graph_solve_task_v3 import run_agent
-    else:
-        from graph.graph_solve_task_v2 import run_agent
+    from graph.virtual_tools import run_agent
 
     # Load configuration from YAML file
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
-
-    already_processed_file = config["logging"]["already_processed_path"]
-    log_dir = os.path.dirname(already_processed_file)
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -68,50 +58,23 @@ def main():
         """Process a single task and return True if successful"""
         try:
             logger.info(f"Processing task: {task_data['id']}")
-            if not task_data["checked_tools"]:
-                return False 
-
-            run_agent(task_data, run_config=config)
-            
+            # Run the agent with the math problem
+            run_agent(
+                seed_info={
+                    "id": task_data['id'],
+                    "background": task_data["persona"]
+                },
+                run_config=config  # Pass the full config
+            )
             return True
         except Exception as e:
-            # Print the exact error location (file:line + code line) plus full traceback
-            tb = e.__traceback__
-            frames = traceback.extract_tb(tb) if tb else []
-            # Prefer the deepest frame that points to *our* repo code, not stdlib/site-packages.
-            project_root = os.path.dirname(os.path.abspath(__file__))
-            user_frames = [
-                fr for fr in frames
-                if os.path.abspath(fr.filename).startswith(project_root + os.sep)
-            ]
-            last_user_frame = user_frames[-1] if user_frames else None
-            last_frame = frames[-1] if frames else None
-
-            frame_to_report = last_user_frame or last_frame
-            if frame_to_report:
-                logger.error(
-                    "Error processing task %s: %s (at %s:%s in %s: %s)",
-                    task_data.get("id", "<unknown>"),
-                    e,
-                    frame_to_report.filename,
-                    frame_to_report.lineno,
-                    frame_to_report.name,
-                    (frame_to_report.line or "").strip(),
-                    exc_info=True,
-                )
-            else:
-                logger.error(
-                    "Error processing task %s: %s",
-                    task_data.get("id", "<unknown>"),
-                    e,
-                    exc_info=True,
-                )
+            logger.error(f"Error processing task {task_data['id']}: {e}")
             return False
 
     def run_tasks_from_file(config: Dict[str, Any]):
         """Run math tasks from a JSONL file with concurrent processing"""
         # Get already processed IDs
-        processed_ids = get_processed_ids(config["logging"]["already_processed_path"])
+        processed_ids = get_processed_ids(config["logging"]["task_file_path"])
         tasks_to_process: List[Dict[str, Any]] = []
         
         # Load tasks to process
@@ -120,20 +83,12 @@ def main():
                 try:
                     task_data = json.loads(line.strip())
                     
-                    for idx, task_and_background in enumerate(task_data["tasks_and_backgrounds"]):
-                        new_task = {
-                            "id": f"{task_data['id']}-{idx}",
-                            "policy": task_data["policy"],
-                            "task_and_background": task_and_background,
-                            "checked_tools": task_data["checked_tools"],
-                        }
-
-                        # Skip if already processed
-                        if new_task['id'] in processed_ids:
-                            logger.info(f"⏭️  Skipping processed task: {new_task['id']}")
-                            continue
+                    # Skip if already processed
+                    if task_data['id'] in processed_ids:
+                        logger.info(f"⏭️  Skipping processed task: {task_data['id']}")
+                        continue
                     
-                        tasks_to_process.append(new_task)
+                    tasks_to_process.append(task_data)
                     
                     # Break if we've reached the max tasks limit
                     if config["processing"]["max_tasks"] and len(tasks_to_process) >= config["processing"]["max_tasks"]:

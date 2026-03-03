@@ -1,5 +1,5 @@
 import re
-from .call_llms import call_llm_api
+from functions.call_llms import call_llm_api
 
 tool_check_prompt = """
 You are an expert at designing virtual tools that are feasible in real-world scenarios.
@@ -183,32 +183,13 @@ if __name__ == "__main__":
     ]
     task_info = 'Create a "Virtual Band Discovery Engine" for the virtual alternative rock band Echo Mirage from Virtual City Harmonia. The system should analyze Echo Mirage\'s distinctive musical signature (characterized by atmospheric guitar work, introspective lyrics, and dynamic tempo shifts), identify 3-5 virtual artists with complementary styles, build a curated discovery playlist with detailed explanations of the musical connections, and generate a shareable summary for distribution on Virtual Music Platform Waveform.\n\nThe discovery should highlight specific musical elements like vocal textures, instrumental arrangements, and thematic depth that connect these virtual artists, providing fans with a meaningful pathway to explore similar music within the virtual alternative scene.'
 
-    def create_step_config(
-        base_config: RunnableConfig, step_name: str, 
-    ) -> RunnableConfig:
-        """Create a new configuration for a specific step with its designated model"""
-        # cfg = AgentConfiguration.from_runnable_config(base_config)
-        step_model_config = base_config["step_models"][step_name]
-        
-        # Create a new config with the specific model for this step
-        step_config = {}
-        if "configurable" not in step_config:
-            step_config["configurable"] = {}
-            
-        # Apply the step-specific model configuration
-        step_config["configurable"]["model_name"] = step_model_config["name"]
-        if "temperature" in step_model_config:
-            step_config["configurable"]["temperature"] = step_model_config["temperature"]
-        if "max_tokens" in step_model_config:
-            step_config["configurable"]["max_tokens"] = step_model_config["max_tokens"]
-        if "use_tools" in step_model_config:
-            step_config["configurable"]["use_tools"] = step_model_config["use_tools"]
-        if "use_thinking" in step_model_config:
-            step_config["configurable"]["use_thinking"] = step_model_config["use_thinking"]
+    _STEP_CONFIG_KEYS = ("model_name", "temperature", "max_tokens")
 
-        step_config["configurable"]["api_configs"] = base_config["api_configs"]
-        
-        return step_config
+    def create_step_config(base_config, step_name):
+        step_model = base_config["step_models"][step_name]
+        configurable = {k: v for k, v in step_model.items() if k in _STEP_CONFIG_KEYS}
+        configurable["api_configs"] = base_config["api_configs"]
+        return {"configurable": configurable}
 
     with open("configs/eval.yaml", 'r', encoding='utf-8') as f:
         agent_config = yaml.safe_load(f)
