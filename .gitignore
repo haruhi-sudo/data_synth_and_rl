@@ -11,5 +11,5 @@ dev_tools/
 workspace/
 *.log
 reasoning_data_synthesis/
-
+output/
 

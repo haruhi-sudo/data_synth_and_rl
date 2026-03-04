@@ -7,7 +7,7 @@ set -x
 ulimit -n 65535
 
 PROJECT_DIR="$(pwd)"
-TOOL_CONFIG_PATH="$PROJECT_DIR/self_instruct/tool_config.yaml"
+TOOL_CONFIG_PATH="$PROJECT_DIR/my_script/tool_config.yaml"
 
 PROJECT_NAME="opensource_test"
 EXPERIMENT_NAME="qwen3_8B_test"
@@ -82,5 +82,5 @@ python3 -m verl.trainer.main_ppo \
     data.val_files=${VAL_FILES} \
     trainer.total_epochs=3 \
     reward_model.reward_manager=dapo \
-    custom_reward_function.path=self_instruct/reward_function.py \
+    custom_reward_function.path=my_script/reward_function.py \
     custom_reward_function.name=compute_score_math \

@@ -1,8 +1,6 @@
 import argparse
-import json
-import os
 
-from datasets import Dataset
+from my_script.data_process.base import convert_dataset, make_base_parser
 
 
 def make_map_fn(split):
@@ -18,8 +16,8 @@ Critical reminder: Tools operate in a stateless manner and will not preserve any
 Reasoning step by step, keep your thinking process concise and minimal, and write ONLY the final answer enclosed in <answer> and </answer> tags. Do not include any extra text outside the tags after the final answer. /no_think
 """
         answer = str(example["gt_answer"])
-        
-        data = {
+
+        return {
             "data_source": "tool_agent",
             "agent_name": "tool_agent",
             "prompt": prompt,
@@ -37,39 +35,21 @@ Reasoning step by step, keep your thinking process concise and minimal, and writ
                 },
             },
         }
-        return data
 
     return process_fn
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--local_dir", default="my_data/search-tool-star")
-    parser.add_argument("--train_data_source", 
-                        default="my_data/tmp/raw/tool_star/toolstar30k.json")
-    parser.add_argument("--test_data_source",
-                        default="my_data/tmp/raw/tool_star/toolstar30k.json")
-    
+    parser = make_base_parser(
+        default_output_dir="my_data/search-tool-star",
+        default_train_source="my_data/tmp/raw/tool_star/toolstar30k.json",
+        default_test_source="my_data/tmp/raw/tool_star/toolstar30k.json",
+    )
     args = parser.parse_args()
 
-    train_data_source = args.train_data_source
-    test_data_source = args.test_data_source
-    
-    with open(train_data_source, "r") as f:
-        train_data = json.load(f)
-    train_dataset = Dataset.from_list(train_data)
-
-    local_dir = args.local_dir
-    os.makedirs(local_dir, exist_ok=True)
-
-    # Process train dataset
-    train_dataset = train_dataset.map(function=make_map_fn("train"), with_indices=True)
-    train_dataset.to_parquet(os.path.join(local_dir, "train.parquet"))
-
-    # Process test dataset
-    with open(test_data_source, "r") as f:
-        test_data = json.load(f)
-    test_dataset = Dataset.from_list(test_data)
-    
-    test_dataset = test_dataset.map(function=make_map_fn("test"), with_indices=True)
-    test_dataset.to_parquet(os.path.join(local_dir, "val.parquet"))
+    convert_dataset(
+        train_source=args.train_data_source,
+        test_source=args.test_data_source,
+        output_dir=args.local_dir,
+        make_map_fn=make_map_fn,
+    )

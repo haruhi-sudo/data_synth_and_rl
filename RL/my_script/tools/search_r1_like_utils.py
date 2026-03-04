@@ -141,16 +141,6 @@ def call_search_api(
     return None, last_error.replace(log_prefix, "API Call Failed: ") if last_error else "API Call Failed after retries"
 
 
-def _passages2string(retrieval_result):
-    """Convert retrieval results to formatted string."""
-    format_reference = ""
-    for idx, doc_item in enumerate(retrieval_result):
-        content = doc_item["document"]["contents"]
-        title = content.split("\n")[0]
-        text = "\n".join(content.split("\n")[1:])
-        format_reference += f"Doc {idx + 1} (Title: {title})\n{text}\n\n"
-    return format_reference.strip()
-
 
 def perform_single_search_batch(
     retrieval_service_url: str,
