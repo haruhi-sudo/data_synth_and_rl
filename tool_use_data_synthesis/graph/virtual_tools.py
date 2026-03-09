@@ -50,7 +50,11 @@ def toolset_gen_node(state: AgentState, config: RunnableConfig):
     cfg = ModelConfiguration.from_runnable_config(step_config)
     
     original_bg = state["seed_info"]["background"]
-    all_content, task, tools, policy = generate_tool_set_policy(cfg=cfg, background_info=original_bg)
+    if "normal_workflow" in state["seed_info"]:
+        normal_workflow = state["seed_info"]["normal_workflow"]
+    else:
+        normal_workflow = None
+    all_content, task, tools, policy = generate_tool_set_policy(cfg=cfg, background_info=original_bg, normal_workflow=normal_workflow)
 
     if task is None or tools is None or policy is None:
         return {

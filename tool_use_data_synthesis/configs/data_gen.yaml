@@ -18,7 +18,7 @@ processing:
   max_tasks: 10000
 
 logging:
-  task_file_path: "output/virtual_tool_use_v3.2-easy.jsonl"
+  task_file_path: "output/virtual_tool_use.jsonl"
 
 paths:
   data_file: "configs/persona_5K.jsonl"

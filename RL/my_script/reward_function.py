@@ -2,15 +2,14 @@ import logging
 import os
 import re
 from typing import Any
-
+import json5
 from dotenv import load_dotenv
 
 from my_script.prompts.judge import (
     ANSWER_JUDGE_SYSTEM_PROMPT,
     ANSWER_JUDGE_USER_PROMPT,
     JUDGE_SYSTEM_PROMPT,
-    JUDGE_V3_2_PROMPT,
-    JUDGE_V3_PROMPT,
+    RUBRICS_JUDGE_01_PROMPT,
     RUBRICS_JUDGE_PROMPT,
 )
 from my_script.utils.llm_client import call_llm_async, close_async_client
@@ -86,22 +85,21 @@ async def rubrics_to_score(question: str, solution: str, rubrics: str):
 
 
 async def compute_score_virtual_tool(data_source, solution_str, ground_truth, extra_info, keep_genrm_critics=False, **kwargs):
-    """Compute score for RL training (v1 rubrics-based)."""
+    """Compute score for RL training (Rubrics-based, and the rubrics should contain the subgoals)."""
     question = extra_info["question"]
     rubrics = extra_info["rubrics"]
     return await rubrics_to_score(question=question, solution=solution_str, rubrics=rubrics)
 
 
-async def compute_score_virtual_tool_v3(data_source, solution_str, ground_truth, extra_info, keep_genrm_critics=False, **kwargs):
-    """Compute score for RL training (v3 task completion judge)."""
+async def compute_score_virtual_tool_completion(data_source, solution_str, ground_truth, extra_info, keep_genrm_critics=False, **kwargs):
+    """Compute score for RL training (Rubrics-based, but the rubrics can contain no subgoals. only give the reward when task is fully solved)."""
     if ("###STOP" not in solution_str and "###TRANSFER_TO_HUMAN" not in solution_str) or "<tool_response>" not in solution_str:
         return 0.0
-    # breakpoint()
     question = extra_info["question"]
     rubrics = extra_info["rubrics"]
     cleaned_solution = extract_solution_summary(f"<|im_start|>assistant\n{solution_str}")
 
-    user_prompt = JUDGE_V3_PROMPT.format(
+    user_prompt = RUBRICS_JUDGE_01_PROMPT.format(
         question=question,
         cleaned_solution=cleaned_solution,
         rubrics=rubrics,
@@ -119,43 +117,6 @@ async def compute_score_virtual_tool_v3(data_source, solution_str, ground_truth,
     if judge_score_match:
         judge_score = judge_score_match.group(1)
         return 1.0 if "task completed" in judge_score.strip().lower() else 0.0
-    return 0.0
-
-
-async def compute_score_virtual_tool_v3_2(data_source, solution_str, ground_truth, extra_info, keep_genrm_critics=False, **kwargs):
-    """Compute score for RL training (v3.2 policy-aware judge)."""
-    if ("###STOP" not in solution_str and "###TRANSFER_TO_HUMAN" not in solution_str) or "<tool_response>" not in solution_str:
-        return 0.0
-
-    import json5
-    question = extra_info["question"]
-    policy_str = extra_info["policy"]
-    cleaned_solution = extract_solution_summary(solution_str)
-
-    reference_success_or_fail_path = json5.loads(extra_info["tools_kwargs"]["mock_tool"]["create_kwargs"]["tool_return_expected"])
-    success_path = reference_success_or_fail_path["normal_path"]
-    fail_path = reference_success_or_fail_path["hack_path"]
-
-    user_prompt = JUDGE_V3_2_PROMPT.format(
-        policy=policy_str,
-        question=question,
-        cleaned_solution=cleaned_solution,
-        success_path=success_path,
-        fail_path=fail_path,
-    )
-    response = await call_llm_async(
-        user_prompt=user_prompt,
-        system_prompt=JUDGE_SYSTEM_PROMPT,
-        api_base=config["api_base"],
-        api_key=config["api_key"],
-        model_name=config["model_name"],
-        max_tokens=10240,
-        temperature=0.1,
-    )
-    judge_score_match = re.search(r'<final_judgment>(.*?)</final_judgment>', response, re.DOTALL)
-    if judge_score_match:
-        judge_score = judge_score_match.group(1)
-        return 1.0 if "success" in judge_score.strip().lower() else 0.0
     return 0.0
 
 

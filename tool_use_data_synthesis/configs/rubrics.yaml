@@ -11,10 +11,10 @@ processing:
   max_tasks: 10000
 
 logging:
-  already_processed_path: "logs/rubrics_v3.jsonl"
+  already_processed_path: "logs/rubrics_evaluated.jsonl"
 
 paths:
-  solution_path: "output/solve_tool_use_v3.1_235b/"
+  solution_path: "output/solve_tool_use_235b/"
 
 api_configs:
   "Qwen3-235B-A22B-Instruct-2507":

@@ -306,6 +306,10 @@ Background Information: {background_info}
 ----------------------------------------
 
 ----------------------------------------
+You may evolve the standard workflow to a more complex tree-based policy: {normal_workflow}
+----------------------------------------
+
+----------------------------------------
 Final Output Format (must follow strictly):
 
 ## Reasoning Step
@@ -321,9 +325,9 @@ Final Output Format (must follow strictly):
 <policy_tree>(policy tree JSON)</policy_tree>
 """
 
-def generate_tool_set_policy(cfg, background_info):
+def generate_tool_set_policy(cfg, background_info, normal_workflow=None):
     # background_info = "Airline (user can cancel, modify, or refund their reservation. But the policy is complex, not all actions are allowed.)"
-    prompt = tool_set_prompt.format(background_info=background_info, tool_call_example=tool_call_example)
+    prompt = tool_set_prompt.format(background_info=background_info, tool_call_example=tool_call_example, normal_workflow=normal_workflow)
     messages = call_llm_api(
         user_prompt=prompt,
         system_prompt="",
