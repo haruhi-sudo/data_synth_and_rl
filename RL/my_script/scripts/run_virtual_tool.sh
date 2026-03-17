@@ -14,21 +14,22 @@ EXPERIMENT_NAME="qwen3_8B_test"
 
 # Hyperparameters
 TRAIN_BATCH_SIZE=64
-MAX_PROMPT_LENGTH=2048
-MAX_RESPONSE_LENGTH=8192
+MAX_PROMPT_LENGTH=4096
+MAX_RESPONSE_LENGTH=10000
 PPO_MINI_BATCH_SIZE=16
 LR=1e-6
-MAX_TURNS=10
+MAX_TURNS=15
 clip_ratio_low=0.2
 clip_ratio_high=0.28
+ROLLOUT_N=16
 
 # Model path and save path
-BEFOREPOINTS="..."
+BEFOREPOINTS="/mnt/data/models/agenticqwen_8b"
 AFTERPOINTS="checkpoints/$PROJECT_NAME/$EXPERIMENT_NAME"
 
 # Data
-TRAIN_FILES="my_data/virtual_tool_use/train.parquet"
-VAL_FILES="my_data/virtual_tool_use/val.parquet"
+TRAIN_FILES="my_data/tmp/tool_use_data_filtered/train.parquet"
+VAL_FILES="my_data/tmp/tool_use_data_filtered/val.parquet"
 
 N_GPUS_PER_NODE=8
 
@@ -62,7 +63,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.multi_turn.format=my_custom_hermes \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
-    actor_rollout_ref.rollout.n=16 \
+    actor_rollout_ref.rollout.n=$ROLLOUT_N \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.rollout.multi_turn.enable=True \
@@ -84,4 +85,16 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_epochs=1 \
     reward_model.reward_manager=dapo \
     custom_reward_function.path=my_script/reward_function.py \
-    custom_reward_function.name=compute_score_virtual_tool \
+    custom_reward_function.name=compute_score_virtual_tool_completion \
+
+# Auto-detect the latest checkpoint step
+LATEST_STEP=$(cat ${AFTERPOINTS}/latest_checkpointed_iteration.txt 2>/dev/null || echo "")
+if [ -z "$LATEST_STEP" ]; then
+    echo "Warning: Could not find latest_checkpointed_iteration.txt, skipping merge"
+else
+    echo "Merging checkpoint from global_step_${LATEST_STEP}"
+    python3 -m verl.model_merger merge \
+        --backend fsdp \
+        --local_dir ${AFTERPOINTS}/global_step_${LATEST_STEP}/actor \
+        --target_dir ${AFTERPOINTS}/merge
+fi

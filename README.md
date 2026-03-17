@@ -25,7 +25,7 @@ The repository is organized into two main modules:
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.10
 - Required Python packages (`langgraph`, `openai`, `python-dotenv`)
 - Access to an LLM API (configured in `.env` and YAML files)
 
@@ -54,7 +54,14 @@ python make_filtered_verl_data.py
 
 ## RL Training
 
-The RL training module uses the `verl` library with SGLang for rollout. Follow the **[verl SGLang worker installation guide](https://verl.readthedocs.io/en/latest/workers/sglang_worker.html#installation)** to set up the environment.
+The RL training module uses the `verl` library with SGLang for rollout. 
+```
+cd RL/
+USE_MEGATRON=0 bash my_script/scripts/install.sh
+pip install --no-deps .
+```
+Follow the **[verl SGLang worker installation guide](https://verl.readthedocs.io/en/latest/workers/sglang_worker.html#installation)** to set up the environment.
+
 
 **(Optional) Reasoning RL** -- If you wish to warm up the model with reasoning tasks before agentic RL, a script is provided for math tasks:
 ```bash
