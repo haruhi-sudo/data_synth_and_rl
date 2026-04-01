@@ -25,7 +25,7 @@ The repository is organized into two main modules:
 
 ## Prerequisites
 
-- Python 3.10
+- Python 3.12
 - Required Python packages (`langgraph`, `openai`, `python-dotenv`)
 - Access to an LLM API (configured in `.env` and YAML files)
 
