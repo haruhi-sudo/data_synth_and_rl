@@ -1,4 +1,4 @@
-<h1 align="center">AgenticQwen: Building Small Agentic Language Models with Synthetic Data and Multi-Round Reinforcement Learning</h1>
+<h1 align="center">AgenticQwen: Training Small Agentic Language Models with Dual Data Flywheels for Industrial-Scale Tool Use</h1>
 
 # Table of Contents
 - [Overview](#overview)
